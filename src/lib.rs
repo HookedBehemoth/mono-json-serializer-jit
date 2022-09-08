@@ -160,6 +160,60 @@ fn emit_string_copy(string: &str, assembler: &mut Assembler<x64::X64Relocation>)
     );
 }
 
+unsafe fn emit_array(eclass: *const MonoClass, assembler: &mut Assembler<x64::X64Relocation>) {
+    let stride = mono_class_array_element_size(eclass);
+    let typ = mono_class_get_type(eclass);
+
+    let empty_label = assembler.new_dynamic_label();
+    let repeat_label = assembler.new_dynamic_label();
+    json_dynasm!(assembler
+        /* check for null */
+        ; test object, object
+        ; je =>empty_label
+
+        /* skip empty arrays */
+        ; mov edi, DWORD [object + 0x18]
+        ; test rdi, rdi
+        ; je =>empty_label
+
+        ;;emit_string_copy("[", assembler)
+
+        /* loop init */
+        ; lea object, [object + 0x20]
+        ; xor rsi, rsi
+        ; jmp >push
+
+        /* push comma starting with the second item */
+        ;=>repeat_label
+        ;;emit_string_copy(",", assembler)
+
+        /* serialize value */
+        ;push:
+        ; push object
+        ; push rdi
+        ; push rsi
+        ;;emit_serialize_value(typ, 0, assembler)
+        ; pop rsi
+        ; pop rdi
+        ; pop object
+
+        /* move to next object and increment counter */
+        ; add object, stride
+        ; add rsi, 1
+        ; cmp rsi, rdi
+        ; jb =>repeat_label
+
+        ;;emit_string_copy("]", assembler)
+        ; jmp >exit
+
+        /* push empty array */
+        ;=>empty_label
+        ;;emit_string_copy("[]", assembler)
+
+        ;exit:
+    );
+}
+
 unsafe fn emit_serialize_value(
     typ: *const MonoType,
     field_offset: i32,
@@ -262,6 +316,12 @@ unsafe fn emit_serialize_value(
                 ;=>null_label
                 ;;emit_null(assembler)
                 ;exit:
+            );
+        }
+        MonoTypeEnum::MONO_TYPE_SZARRAY => {
+            json_dynasm!(assembler
+                ; mov object, [object + field_offset]
+                ;;emit_array(&*(*typ).klass, assembler)
             );
         }
         _ => {
