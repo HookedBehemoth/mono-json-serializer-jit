@@ -29,12 +29,12 @@ unsafe fn emit_boolean(field_offset: i32, assembler: &mut Assembler<x64::X64Relo
         ; mov temp_8, BYTE [object + field_offset]
         ; test temp_8, temp_8
         ; je >not
-        ; mov DWORD [buffer], 0x65757274
+        ; mov DWORD [buffer], 0x65757274 // "true" reversed
         ; add buffer, 4
         ; jmp >exit
         ;not:
-        ; mov DWORD [buffer], 0x736C6166
-        ; mov DWORD [buffer + 1], 0x65736C61
+        ; mov DWORD [buffer], 0x736C6166 // "fals" reversed
+        ; mov DWORD [buffer + 1], 0x65736C61 // "alse" reversed
         ; add buffer, 5
         ; exit:
     );
@@ -101,7 +101,7 @@ fn emit_double(field_offset: i32, assembler: &mut Assembler<x64::X64Relocation>)
 
 fn emit_null(assembler: &mut Assembler<x64::X64Relocation>) {
     json_dynasm!(assembler
-        ; mov DWORD [buffer], 0x6C6C756E
+        ; mov DWORD [buffer], 0x6C6C756E // "null" reversed
         ; add buffer, 4
     );
 }
