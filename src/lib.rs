@@ -106,22 +106,26 @@ fn emit_null(assembler: &mut Assembler<x64::X64Relocation>) {
     );
 }
 
+/**
+ * Pack strings into 32 and 16 bit moves instead of
+ * looping over very string.
+ */
 fn emit_string_copy(string: &str, assembler: &mut Assembler<x64::X64Relocation>) {
-    fn pack4(s: &[u8], off: usize) -> u32 {
+    fn pack32(s: &[u8], off: usize) -> u32 {
         (s[off + 3] as u32).shl(0x18) as u32
             | (s[off + 2] as u32).shl(0x10) as u32
             | (s[off + 1] as u32).shl(0x08) as u32
             | (s[off + 0] as u32).shl(0x00) as u32
     }
-    fn pack2(s: &[u8], off: usize) -> u16 {
+    fn pack16(s: &[u8], off: usize) -> u16 {
         (s[off + 1] as u16).shl(0x08) as u16 | (s[off + 0] as u16).shl(0x00) as u16
     }
 
     let s: &[u8] = string.as_bytes();
-    if s.len() > 4 {
+    if s.len() >= 4 {
         let mut off: usize = 0;
         while (off + 4) < s.len() {
-            let value = pack4(s, off);
+            let value = pack32(s, off);
             json_dynasm!(assembler
                 ; mov DWORD [buffer + off as _], value as _
             );
@@ -129,24 +133,19 @@ fn emit_string_copy(string: &str, assembler: &mut Assembler<x64::X64Relocation>)
         }
         if off < s.len() {
             let start = s.len() - 4;
-            let value = pack4(s, start);
+            let value = pack32(s, start);
             json_dynasm!(assembler
                 ; mov DWORD [buffer + start as _], value as _
             );
         }
-    } else if s.len() == 4 {
-        let value = pack4(s, 0);
-        json_dynasm!(assembler
-            ; mov DWORD [buffer], value as _
-        );
     } else if s.len() == 3 {
-        let value = pack2(s, 0);
+        let value = pack16(s, 0);
         json_dynasm!(assembler
             ; mov WORD [buffer], value as _
             ; mov BYTE [buffer + 2], s[2] as _
         );
     } else if s.len() == 2 {
-        let value = pack2(s, 0);
+        let value = pack16(s, 0);
         json_dynasm!(assembler
             ; mov WORD [buffer], value as _
         );
