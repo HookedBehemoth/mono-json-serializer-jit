@@ -19,6 +19,7 @@ extern "C" {
     pub fn mono_field_get_type(field: *const MonoClassField) -> *const MonoType;
 	pub fn mono_type_get_attrs(typ: *const MonoType) -> u32;
     pub fn mono_array_element_size(klass: *const MonoClass) -> i32;
+    pub fn mono_class_array_element_size(klass: *const MonoClass) -> i32;
 }
 
 pub struct RawString {}
