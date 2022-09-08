@@ -252,13 +252,14 @@ unsafe fn emit_serialize_value(
             );
         }
         MonoTypeEnum::MONO_TYPE_CLASS => {
+            let null_label = assembler.new_dynamic_label();
             json_dynasm!(assembler
                 ; mov object, [object + field_offset]
                 ; test object, object
-                ; je >null
+                ; je =>null_label
                 ;;emit_serialize_class(&*(*typ).klass, assembler)
                 ; jmp >exit
-                ;null:
+                ;=>null_label
                 ;;emit_null(assembler)
                 ;exit:
             );
