@@ -3,7 +3,7 @@ mod mono;
 use dynasmrt::*;
 use mono::*;
 
-use std::{alloc, ops::Shl, ptr, arch::asm};
+use std::{alloc, arch::asm, ffi::CStr, ops::Shl, ptr};
 
 macro_rules! json_dynasm {
     ($ops:ident $($t:tt)*) => {
@@ -350,17 +350,19 @@ unsafe fn emit_serialize_class(
             continue;
         }
 
-        if first {
+        let prefix = if first {
             first = false;
+            ""
         } else {
-            emit_string_copy(",", assembler);
-        }
+            ","
+        };
 
-        let ptr = (*field).name as *const u8;
-        let string = format!(
-            "\"{}\":",
-            std::ffi::CStr::from_ptr(ptr as _).to_str().unwrap()
-        );
+        let cstr = CStr::from_ptr((*field).name as _);
+        let string = if let Ok(name) = cstr.to_str() {
+            format!("{prefix}\"{name}\":")
+        } else {
+            format!("{prefix}{cstr:?}:")
+        };
         emit_string_copy(&string, assembler);
 
         json_dynasm!(assembler
