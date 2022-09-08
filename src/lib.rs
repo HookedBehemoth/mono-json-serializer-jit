@@ -51,14 +51,14 @@ unsafe fn push_utf16(s: *const MonoString, dst: *mut u8) -> usize {
     }
 }
 
-unsafe fn push_float<F: ryu::Float + std::fmt::Display>(value: F, dst: *mut u8) -> usize {
+unsafe fn push_float<F: ryu::Float>(value: F, dst: *mut u8) -> usize {
     let mut buffer = ryu::Buffer::new();
     let printed = buffer.format(value);
     ptr::copy_nonoverlapping(printed.as_ptr(), dst, printed.len());
     printed.len()
 }
 
-unsafe fn push_integer<I: itoa::Integer + std::fmt::Display>(value: I, dst: *mut u8) -> usize {
+unsafe fn push_integer<I: itoa::Integer>(value: I, dst: *mut u8) -> usize {
     let mut buffer = itoa::Buffer::new();
     let printed = buffer.format(value);
     ptr::copy_nonoverlapping(printed.as_ptr(), dst, printed.len());
