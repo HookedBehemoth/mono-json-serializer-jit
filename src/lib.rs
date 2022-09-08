@@ -409,6 +409,7 @@ pub unsafe extern "C" fn emit(obj: *const MonoObject) -> *mut ExecutableBuffer {
         /* Store buffer start */
         ; push buffer
         ;;emit_serialize_class(klass, &mut assembler)
+        ; mov BYTE [buffer], '\0' as _
         /* Calculate buffer length */
         ; pop rsi
         ; sub buffer, rsi
