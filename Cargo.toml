@@ -17,3 +17,6 @@ dynasmrt = "1.2.3"
 itoa = "1.0.3"
 ryu = "1.0.11"
 simdutf = "0.3.0"
+
+[profile.release]
+lto = true
