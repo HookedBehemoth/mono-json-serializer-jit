@@ -8,6 +8,7 @@ crate-type = ["cdylib"]
 
 [features]
 utf = []
+asm = []
 boehm = []
 sgen = []
 

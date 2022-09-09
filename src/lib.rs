@@ -383,15 +383,13 @@ pub unsafe extern "C" fn emit_length(obj: *const MonoObject) -> *mut ExecutableB
 
     let _ = obj;
 
-    let code_length = assembler.offset().0;
-
     let block = assembler.finalize().unwrap();
 
-    {
+    if cfg!(feature = "asm") {
         use std::io::prelude::*;
 
-        let mut file = std::fs::File::create("asm.bin").unwrap();
-        file.write_all(&(&block as &[u8])[..code_length]).unwrap();
+        let mut file = std::fs::File::create("asm_length.bin").unwrap();
+        file.write_all(&block).unwrap();
     }
 
     Box::into_raw(Box::new(block))
@@ -415,15 +413,13 @@ pub unsafe extern "C" fn emit(obj: *const MonoObject) -> *mut ExecutableBuffer {
         ; ret
     );
 
-    let code_length = assembler.offset().0;
-
     let block = assembler.finalize().unwrap();
 
-    {
+    if cfg!(feature = "asm") {
         use std::io::prelude::*;
 
         let mut file = std::fs::File::create("asm.bin").unwrap();
-        file.write_all(&(&block as &[u8])[..code_length]).unwrap();
+        file.write_all(&block).unwrap();
     }
 
     Box::into_raw(Box::new(block))
