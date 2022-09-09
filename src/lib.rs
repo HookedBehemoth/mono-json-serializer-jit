@@ -333,8 +333,6 @@ unsafe fn emit_serialize_class(
     klass: *const MonoClass,
     assembler: &mut Assembler<x64::X64Relocation>,
 ) {
-    emit_string_copy("{", assembler);
-
     let mut iter = ptr::null();
     let mut first = true;
     loop {
@@ -352,9 +350,9 @@ unsafe fn emit_serialize_class(
 
         let prefix = if first {
             first = false;
-            ""
+            '{'
         } else {
-            ","
+            ','
         };
 
         let cstr = CStr::from_ptr((*field).name as _);
