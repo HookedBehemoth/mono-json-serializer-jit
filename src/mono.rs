@@ -8,17 +8,10 @@ use core::{ffi, fmt};
 use std::{ffi, fmt};
 
 extern "C" {
-    pub fn mono_add_internal_call(name: *const u8, method: *const ffi::c_void);
 	pub fn mono_object_get_class(obj: *const MonoObject) -> *const MonoClass;
-    pub fn mono_class_get_name(klass: *const MonoClass) -> *const RawString;
     pub fn mono_class_get_fields(klass: *const MonoClass, iter: *const *const ffi::c_void) -> *const MonoClassField;
     pub fn mono_class_get_type(klass: *const MonoClass) -> *const MonoType;
-	pub fn mono_class_get_flags(klass: *const MonoClass) -> u32;
-    pub fn mono_field_get_name(field: *const MonoClassField) -> *const RawString;
-    pub fn mono_field_get_offset(field: *const MonoClassField) -> u32;
     pub fn mono_field_get_type(field: *const MonoClassField) -> *const MonoType;
-	pub fn mono_type_get_attrs(typ: *const MonoType) -> u32;
-    pub fn mono_array_element_size(klass: *const MonoClass) -> i32;
     pub fn mono_class_array_element_size(klass: *const MonoClass) -> i32;
 }
 
