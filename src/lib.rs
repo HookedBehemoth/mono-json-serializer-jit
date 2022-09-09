@@ -13,18 +13,20 @@ macro_rules! json_dynasm {
             ; .alias object, r15
             ; .alias buffer, r14
 
-            ; .alias temp, r12
-            ; .alias temp_32, r12d
-            ; .alias temp_16, r12w
-            ; .alias temp_8, r12b
-            // return code/return bytecode pc
+            ; .alias temp, rdx
+            ; .alias temp_32, edx
+            ; .alias temp_16, dx
+            ; .alias temp_8, dl
+
             ; .alias retval, rax
             $($t)*
         )
     }
 }
 
-unsafe fn emit_boolean(field_offset: i32, assembler: &mut Assembler<x64::X64Relocation>) {
+type Assembler = dynasmrt::Assembler<x64::X64Relocation>;
+
+unsafe fn emit_boolean(field_offset: i32, assembler: &mut Assembler) {
     json_dynasm!(assembler
         ; mov temp_8, BYTE [object + field_offset]
         ; test temp_8, temp_8
@@ -40,25 +42,62 @@ unsafe fn emit_boolean(field_offset: i32, assembler: &mut Assembler<x64::X64Relo
     );
 }
 
-unsafe fn push_utf16(s: *const MonoString, dst: *mut u8) -> usize {
-    if cfg!(feature = "utf") {
+#[cfg(feature = "utf")]
+mod utf16 {
+    use dynasmrt::*;
+
+    pub unsafe extern "sysv64" fn push_string(s: *const crate::MonoString, dst: *mut u8) -> usize {
         simdutf::convert_valid_utf16le_to_utf8(&(*s).chars as *const u16, (*s).length as _, dst)
-    } else {
+    }
+
+    pub unsafe extern "sysv64" fn push_char(s: *const u16, dst: *mut u8) -> usize {
+        simdutf::convert_valid_utf16le_to_utf8(s, 1, dst)
+    }
+
+    pub fn emit_char(field_offset: i32, assembler: &mut crate::Assembler) {
+        json_dynasm!(assembler
+            ;;crate::emit_string_copy("\"", assembler)
+
+            ; lea rdi, [object + field_offset]
+            ; mov rsi, buffer
+            ; mov temp, QWORD push_char as _
+            ; call temp
+            ; add buffer, retval
+
+            ;;crate::emit_string_copy("\"", assembler)
+        );
+    }
+}
+#[cfg(not(feature = "utf"))]
+mod utf16 {
+    use dynasmrt::*;
+
+    pub unsafe extern "sysv64" fn push_string(s: *const crate::MonoString, dst: *mut u8) -> usize {
         for i in 0..((*s).length as usize) {
             *dst.add(i) = *(&(*s).chars as *const u16).add(i) as _;
         }
         (*s).length as _
     }
+
+    pub fn emit_char(field_offset: i32, assembler: &mut crate::Assembler) {
+        json_dynasm!(assembler
+            ;;crate::emit_string_copy("\"", assembler)
+            ; mov temp_8, [object + field_offset]
+            ; mov BYTE [buffer], temp_8
+            ; add buffer, 1
+            ;;crate::emit_string_copy("\"", assembler)
+        );
+    }
 }
 
-unsafe fn push_float<F: ryu::Float>(value: F, dst: *mut u8) -> usize {
+unsafe extern "sysv64" fn push_float<F: ryu::Float>(value: F, dst: *mut u8) -> usize {
     let mut buffer = ryu::Buffer::new();
     let printed = buffer.format(value);
     ptr::copy_nonoverlapping(printed.as_ptr(), dst, printed.len());
     printed.len()
 }
 
-unsafe fn push_integer<I: itoa::Integer>(value: I, dst: *mut u8) -> usize {
+unsafe extern "sysv64" fn push_integer<I: itoa::Integer>(value: I, dst: *mut u8) -> usize {
     let mut buffer = itoa::Buffer::new();
     let printed = buffer.format(value);
     ptr::copy_nonoverlapping(printed.as_ptr(), dst, printed.len());
@@ -68,38 +107,36 @@ unsafe fn push_integer<I: itoa::Integer>(value: I, dst: *mut u8) -> usize {
 macro_rules! emit_integer {
     ($ty:ty, $offset:expr, $reg:ident, $width:expr, $assembler:ident) => {
         json_dynasm!($assembler
-            ; push rdi
             ; mov $reg, $width [object + $offset]
             ; mov rsi, buffer
-            ; mov rax, QWORD push_integer::<$ty> as _
-            ; call rax
+            ; mov temp, QWORD push_integer::<$ty> as _
+            ; call temp
             ; add buffer, retval
-            ; pop rdi
         )
     };
 }
 
-fn emit_float(field_offset: i32, assembler: &mut Assembler<x64::X64Relocation>) {
+fn emit_float(field_offset: i32, assembler: &mut Assembler) {
     json_dynasm!(assembler
         ; movss xmm0, DWORD [object + field_offset]
         ; mov rdi, buffer
-        ; mov rax, QWORD push_float::<f32> as _
-        ; call rax
+        ; mov temp, QWORD push_float::<f32> as _
+        ; call temp
         ; add buffer, retval
     );
 }
 
-fn emit_double(field_offset: i32, assembler: &mut Assembler<x64::X64Relocation>) {
+fn emit_double(field_offset: i32, assembler: &mut Assembler) {
     json_dynasm!(assembler
         ; movsd xmm0, QWORD [object + field_offset]
         ; mov rdi, buffer
-        ; mov rax, QWORD push_float::<f64> as _
-        ; call rax
+        ; mov temp, QWORD push_float::<f64> as _
+        ; call temp
         ; add buffer, retval
     );
 }
 
-fn emit_null(assembler: &mut Assembler<x64::X64Relocation>) {
+fn emit_null(assembler: &mut Assembler) {
     json_dynasm!(assembler
         ; mov DWORD [buffer], 0x6C6C756E // "null" reversed
         ; add buffer, 4
@@ -110,7 +147,7 @@ fn emit_null(assembler: &mut Assembler<x64::X64Relocation>) {
  * Pack strings into 32 and 16 bit moves instead of
  * looping over very string.
  */
-fn emit_string_copy(string: &str, assembler: &mut Assembler<x64::X64Relocation>) {
+fn emit_string_copy(string: &str, assembler: &mut Assembler) {
     fn pack32(s: &[u8], off: usize) -> u32 {
         (s[off + 3] as u32).shl(0x18) as u32
             | (s[off + 2] as u32).shl(0x10) as u32
@@ -159,27 +196,34 @@ fn emit_string_copy(string: &str, assembler: &mut Assembler<x64::X64Relocation>)
     );
 }
 
-unsafe fn emit_array(eclass: *const MonoClass, assembler: &mut Assembler<x64::X64Relocation>) {
+unsafe fn emit_array(field_offset: i32, eclass: *const MonoClass, assembler: &mut Assembler) {
     let stride = mono_class_array_element_size(eclass);
     let typ = mono_class_get_type(eclass);
 
     let empty_label = assembler.new_dynamic_label();
     let repeat_label = assembler.new_dynamic_label();
     json_dynasm!(assembler
+        ; push object
+        ; push r12
+        ; push r13
+
+        /* load object */
+        ; mov object, [object + field_offset]
+
         /* check for null */
         ; test object, object
         ; je =>empty_label
 
         /* skip empty arrays */
-        ; mov edi, DWORD [object + 0x18]
-        ; test rdi, rdi
+        ; mov r13d, DWORD [object + 0x18]
+        ; test r13, r13
         ; je =>empty_label
 
         ;;emit_string_copy("[", assembler)
 
         /* loop init */
         ; lea object, [object + 0x20]
-        ; xor rsi, rsi
+        ; xor r12, r12
         ; jmp >push
 
         /* push comma starting with the second item */
@@ -189,17 +233,13 @@ unsafe fn emit_array(eclass: *const MonoClass, assembler: &mut Assembler<x64::X6
         /* serialize value */
         ;push:
         ; push object
-        ; push rdi
-        ; push rsi
         ;;emit_serialize_value(typ, 0, assembler)
-        ; pop rsi
-        ; pop rdi
         ; pop object
 
         /* move to next object and increment counter */
         ; add object, stride
-        ; add rsi, 1
-        ; cmp rsi, rdi
+        ; add r12, 1
+        ; cmp r12, r13
         ; jb =>repeat_label
 
         ;;emit_string_copy("]", assembler)
@@ -210,41 +250,19 @@ unsafe fn emit_array(eclass: *const MonoClass, assembler: &mut Assembler<x64::X6
         ;;emit_string_copy("[]", assembler)
 
         ;exit:
+        ; pop r13
+        ; pop r12
+        ; pop object
     );
 }
 
-unsafe fn emit_serialize_value(
-    typ: *const MonoType,
-    field_offset: i32,
-    assembler: &mut Assembler<x64::X64Relocation>,
-) {
+unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assembler: &mut Assembler) {
     match (*typ).typ {
         MonoTypeEnum::MONO_TYPE_BOOLEAN => {
             emit_boolean(field_offset, assembler);
         }
         MonoTypeEnum::MONO_TYPE_CHAR => {
-            if cfg!(feature = "utf") {
-                json_dynasm!(assembler
-                    ;;emit_string_copy("\"", assembler)
-                    ; lea rdi, [object + field_offset]
-                    ; mov rsi, 1
-                    ; mov rdx, buffer
-                    ; push rax
-                    ; mov rax, QWORD simdutf::convert_valid_utf16le_to_utf8 as _
-                    ; call rax
-                    ; add buffer, retval
-                    ; pop rax
-                    ;;emit_string_copy("\"", assembler)
-                );
-            } else {
-                json_dynasm!(assembler
-                    ;;emit_string_copy("\"", assembler)
-                    ; mov temp_8, [object + field_offset]
-                    ; mov BYTE [buffer], temp_8
-                    ; add buffer, 1
-                    ;;emit_string_copy("\"", assembler)
-                );
-            }
+            utf16::emit_char(field_offset, assembler);
         }
         MonoTypeEnum::MONO_TYPE_I1 => {
             emit_integer!(i8, field_offset, dil, BYTE, assembler);
@@ -280,17 +298,16 @@ unsafe fn emit_serialize_value(
         }
         MonoTypeEnum::MONO_TYPE_STRING => {
             json_dynasm!(assembler
-                ; mov object, QWORD [object + field_offset]
-                ; test object, object
+                ; mov rdi, QWORD [object + field_offset]
+                ; test rdi, rdi
                 ; je >null
                 ;;emit_string_copy("\"", assembler)
-                ; mov rdi, object
+
                 ; mov rsi, buffer
-                ; push rax
-                ; mov rax, QWORD push_utf16 as _
-                ; call rax
+                ; mov temp, QWORD utf16::push_string as _
+                ; call temp
+
                 ; add buffer, retval
-                ; pop rax
                 ;;emit_string_copy("\"", assembler)
                 ; jmp >exit
                 ;null:
@@ -300,28 +317,38 @@ unsafe fn emit_serialize_value(
         }
         MonoTypeEnum::MONO_TYPE_VALUETYPE => {
             json_dynasm!(assembler
+                ; push object
+                ; push object
+
                 ; lea object, [object + field_offset - 0x10]
                 ;;emit_serialize_class(&*(*typ).klass, assembler)
+
+                ; pop object
+                ; pop object
             );
         }
         MonoTypeEnum::MONO_TYPE_CLASS => {
             let null_label = assembler.new_dynamic_label();
             json_dynasm!(assembler
+                ; push object
+                ; push object
+
                 ; mov object, [object + field_offset]
                 ; test object, object
                 ; je =>null_label
+
                 ;;emit_serialize_class(&*(*typ).klass, assembler)
                 ; jmp >exit
                 ;=>null_label
                 ;;emit_null(assembler)
+
                 ;exit:
+                ; pop object
+                ; pop object
             );
         }
         MonoTypeEnum::MONO_TYPE_SZARRAY => {
-            json_dynasm!(assembler
-                ; mov object, [object + field_offset]
-                ;;emit_array(&*(*typ).klass, assembler)
-            );
+            emit_array(field_offset, &*(*typ).klass, assembler);
         }
         _ => {
             emit_null(assembler);
@@ -329,10 +356,7 @@ unsafe fn emit_serialize_value(
     }
 }
 
-unsafe fn emit_serialize_class(
-    klass: *const MonoClass,
-    assembler: &mut Assembler<x64::X64Relocation>,
-) {
+unsafe fn emit_serialize_class(klass: *const MonoClass, assembler: &mut Assembler) {
     let mut iter = ptr::null();
     let mut first = true;
     loop {
@@ -363,11 +387,7 @@ unsafe fn emit_serialize_class(
         };
         emit_string_copy(&string, assembler);
 
-        json_dynasm!(assembler
-            ; push object
-            ;;emit_serialize_value(typ, (*field).offset, assembler)
-            ; pop object
-        );
+        emit_serialize_value(typ, (*field).offset, assembler);
     }
 
     emit_string_copy("}", assembler);
@@ -402,14 +422,31 @@ pub unsafe extern "C" fn emit(obj: *const MonoObject) -> *mut ExecutableBuffer {
     let klass = mono_object_get_class(obj);
 
     json_dynasm!(assembler
-        /* Store buffer start */
+        /* store non-volatile registers */
+        ; push object
         ; push buffer
+
+        /* load arguments */
+        ; mov object, rdi
+        ; mov buffer, rsi
+
+        /* store buffer start */
+        ; push buffer
+
         ;;emit_serialize_class(klass, &mut assembler)
+
+        /* Terminate string for further ffi */
         ; mov BYTE [buffer], '\0' as _
+
         /* Calculate buffer length */
-        ; pop rsi
-        ; sub buffer, rsi
+        ; pop temp
+        ; sub buffer, temp
         ; mov retval, buffer
+
+        /* restore non-volatile registers */
+        ; pop buffer
+        ; pop object
+
         ; ret
     );
 
@@ -436,10 +473,12 @@ pub unsafe extern "C" fn invoke(
     asm!(
         "call rcx",
 
-        in("r14") buffer,
-        in("r15") obj,
+        in("rdi") obj,
+        in("rsi") buffer,
         in("rcx") (*code).as_ptr(),
         out("rax") ret,
+
+        clobber_abi("sysv64"),
     );
 
     ret
