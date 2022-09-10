@@ -31,13 +31,10 @@ unsafe fn emit_boolean(field_offset: i32, assembler: &mut Assembler) {
         ; mov temp_8, BYTE [object + field_offset]
         ; test temp_8, temp_8
         ; je >not
-        ; mov DWORD [buffer], 0x65757274 // "true" reversed
-        ; add buffer, 4
+        ;;emit_string_copy("true", assembler)
         ; jmp >exit
         ;not:
-        ; mov DWORD [buffer], 0x736C6166 // "fals" reversed
-        ; mov DWORD [buffer + 1], 0x65736C61 // "alse" reversed
-        ; add buffer, 5
+        ;;emit_string_copy("false", assembler)
         ; exit:
     );
 }
@@ -54,6 +51,16 @@ mod utf16 {
         simdutf::convert_valid_utf16le_to_utf8(s, 1, dst)
     }
 
+    pub unsafe extern "sysv64" fn calc_string_size(s: *const crate::MonoString) -> usize {
+        let slice = std::slice::from_raw_parts(&(*s).chars as *const u16, (*s).length as _);
+        simdutf::count_utf8_from_utf16le(slice)
+    }
+
+    pub unsafe extern "sysv64" fn calc_char_size(s: *const u16) -> usize {
+        let slice = std::slice::from_raw_parts(s, 1);
+        simdutf::count_utf8_from_utf16le(slice)
+    }
+
     pub fn emit_char(field_offset: i32, assembler: &mut crate::Assembler) {
         json_dynasm!(assembler
             ;;crate::emit_string_copy("\"", assembler)
@@ -65,6 +72,23 @@ mod utf16 {
             ; add buffer, retval
 
             ;;crate::emit_string_copy("\"", assembler)
+        );
+    }
+
+    pub fn emit_string_size(assembler: &mut crate::Assembler) {
+        json_dynasm!(assembler
+            ; mov temp, QWORD calc_string_size as _
+            ; call temp
+            ; add buffer, retval
+        );
+    }
+
+    pub fn emit_char_length(field_offset: i32, assembler: &mut crate::Assembler) {
+        json_dynasm!(assembler
+            ; lea rdi, [object + field_offset]
+            ; mov temp, QWORD calc_char_size as _
+            ; call temp
+            ; add buffer, retval
         );
     }
 }
@@ -88,12 +112,31 @@ mod utf16 {
             ;;crate::emit_string_copy("\"", assembler)
         );
     }
+
+    pub fn emit_string_size(assembler: &mut crate::Assembler) {
+        json_dynasm!(assembler
+            ; mov rdi, [rdi + 0x18]
+            ; add buffer, rdi
+        );
+    }
+
+    pub fn emit_char_length(_: i32, assembler: &mut crate::Assembler) {
+        json_dynasm!(assembler
+            ; add buffer, 1
+        );
+    }
 }
 
 unsafe extern "sysv64" fn push_float<F: ryu::Float>(value: F, dst: *mut u8) -> usize {
     let mut buffer = ryu::Buffer::new();
     let printed = buffer.format(value);
     ptr::copy_nonoverlapping(printed.as_ptr(), dst, printed.len());
+    printed.len()
+}
+
+unsafe extern "sysv64" fn calc_float_size<F: ryu::Float>(value: F) -> usize {
+    let mut buffer = ryu::Buffer::new();
+    let printed = buffer.format(value);
     printed.len()
 }
 
@@ -104,43 +147,10 @@ unsafe extern "sysv64" fn push_integer<I: itoa::Integer>(value: I, dst: *mut u8)
     printed.len()
 }
 
-macro_rules! emit_integer {
-    ($ty:ty, $offset:expr, $reg:ident, $width:expr, $assembler:ident) => {
-        json_dynasm!($assembler
-            ; mov $reg, $width [object + $offset]
-            ; mov rsi, buffer
-            ; mov temp, QWORD push_integer::<$ty> as _
-            ; call temp
-            ; add buffer, retval
-        )
-    };
-}
-
-fn emit_float(field_offset: i32, assembler: &mut Assembler) {
-    json_dynasm!(assembler
-        ; movss xmm0, DWORD [object + field_offset]
-        ; mov rdi, buffer
-        ; mov temp, QWORD push_float::<f32> as _
-        ; call temp
-        ; add buffer, retval
-    );
-}
-
-fn emit_double(field_offset: i32, assembler: &mut Assembler) {
-    json_dynasm!(assembler
-        ; movsd xmm0, QWORD [object + field_offset]
-        ; mov rdi, buffer
-        ; mov temp, QWORD push_float::<f64> as _
-        ; call temp
-        ; add buffer, retval
-    );
-}
-
-fn emit_null(assembler: &mut Assembler) {
-    json_dynasm!(assembler
-        ; mov DWORD [buffer], 0x6C6C756E // "null" reversed
-        ; add buffer, 4
-    );
+unsafe extern "sysv64" fn calc_integer_size<I: itoa::Integer>(value: I) -> usize {
+    let mut buffer = itoa::Buffer::new();
+    let printed = buffer.format(value);
+    printed.len()
 }
 
 /**
@@ -256,7 +266,72 @@ unsafe fn emit_array(field_offset: i32, eclass: *const MonoClass, assembler: &mu
     );
 }
 
+unsafe fn emit_array_size(field_offset: i32, eclass: *const MonoClass, assembler: &mut Assembler) {
+    let stride = mono_class_array_element_size(eclass);
+    let typ = mono_class_get_type(eclass);
+
+    let exit_label = assembler.new_dynamic_label();
+    let repeat_label = assembler.new_dynamic_label();
+    json_dynasm!(assembler
+        ; push object
+        ; push r12
+        ; push r13
+
+        /* load object */
+        ; mov object, [object + field_offset]
+
+        /* check for null */
+        ; test object, object
+        ; je =>exit_label
+
+        /* skip empty arrays */
+        ; mov r13d, DWORD [object + 0x18]
+        ; test r13, r13
+        ; je =>exit_label
+
+        /* loop init */
+        ; lea object, [object + 0x20]
+        ; xor r12, r12
+
+        /* push comma starting with the second item */
+        ;=>repeat_label
+
+        /* serialize value */
+        ; push object
+        ;;let base_size = emit_calc_value(typ, 0, assembler)
+        ; add buffer, base_size as _
+        ; pop object
+
+        /* move to next object and increment counter */
+        ; add object, stride
+        ; add r12, 1
+        ; cmp r12, r13
+        ; jb =>repeat_label
+
+        /* commas */
+        ; add buffer, r13
+        ; sub buffer, 1
+
+        ;=>exit_label
+        ; pop r13
+        ; pop r12
+        ; pop object
+    );
+}
+
 unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assembler: &mut Assembler) {
+    macro_rules! emit_integer {
+        ($ty:ty, $offset:expr, $reg:ident, $width:expr, $assembler:ident) => {
+            json_dynasm!($assembler
+                ; mov $reg, $width [object + $offset]
+                ; mov rsi, buffer
+                ; mov temp, QWORD push_integer::<$ty> as _
+                ; call temp
+                ; add buffer, retval
+            )
+        };
+    }
+    
     match (*typ).typ {
         MonoTypeEnum::MONO_TYPE_BOOLEAN => {
             emit_boolean(field_offset, assembler);
@@ -291,10 +366,22 @@ unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assemble
             emit_integer!(u64, field_offset, rdi, QWORD, assembler);
         }
         MonoTypeEnum::MONO_TYPE_R4 => {
-            emit_float(field_offset, assembler);
+            json_dynasm!(assembler
+                ; movss xmm0, DWORD [object + field_offset]
+                ; mov rdi, buffer
+                ; mov temp, QWORD push_float::<f32> as _
+                ; call temp
+                ; add buffer, retval
+            );
         }
         MonoTypeEnum::MONO_TYPE_R8 => {
-            emit_double(field_offset, assembler);
+            json_dynasm!(assembler
+                ; movsd xmm0, QWORD [object + field_offset]
+                ; mov rdi, buffer
+                ; mov temp, QWORD push_float::<f64> as _
+                ; call temp
+                ; add buffer, retval
+            );
         }
         MonoTypeEnum::MONO_TYPE_STRING => {
             json_dynasm!(assembler
@@ -311,7 +398,7 @@ unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assemble
                 ;;emit_string_copy("\"", assembler)
                 ; jmp >exit
                 ;null:
-                ;;emit_null(assembler)
+                ;;emit_string_copy("\"\"", assembler)
                 ;exit:
             );
         }
@@ -340,7 +427,7 @@ unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assemble
                 ;;emit_serialize_class(&*(*typ).klass, assembler)
                 ; jmp >exit
                 ;=>null_label
-                ;;emit_null(assembler)
+                ;;emit_string_copy("null", assembler)
 
                 ;exit:
                 ; pop object
@@ -351,7 +438,7 @@ unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assemble
             emit_array(field_offset, &*(*typ).klass, assembler);
         }
         _ => {
-            emit_null(assembler);
+            emit_string_copy("null", assembler);
         }
     }
 }
@@ -393,15 +480,201 @@ unsafe fn emit_serialize_class(klass: *const MonoClass, assembler: &mut Assemble
     emit_string_copy("}", assembler);
 }
 
+unsafe fn emit_calc_value(typ: *const MonoType, field_offset: i32, assembler: &mut Assembler) -> usize {
+    macro_rules! emit_integer_size {
+        ($ty:ty, $offset:expr, $reg:ident, $width:expr, $assembler:ident) => {
+            json_dynasm!($assembler
+                ; mov $reg, $width [object + $offset]
+                ; mov temp, QWORD calc_integer_size::<$ty> as _
+                ; call temp
+                ; add buffer, retval
+            )
+        };
+    }
+    
+    match (*typ).typ {
+        MonoTypeEnum::MONO_TYPE_BOOLEAN => {
+            json_dynasm!(assembler
+                ; mov temp_8, BYTE [object + field_offset]
+                ; sub buffer, temp
+            );
+            return 5;
+        }
+        MonoTypeEnum::MONO_TYPE_CHAR => {
+            utf16::emit_char_length(field_offset, assembler);
+            return 2;
+        }
+        MonoTypeEnum::MONO_TYPE_I1 => {
+            emit_integer_size!(i8, field_offset, dil, BYTE, assembler);
+        }
+        MonoTypeEnum::MONO_TYPE_I2 => {
+            emit_integer_size!(i16, field_offset, di, WORD, assembler);
+        }
+        MonoTypeEnum::MONO_TYPE_I4 => {
+            emit_integer_size!(i32, field_offset, edi, DWORD, assembler);
+        }
+        /* FIXME: So far, we're only running on 64 bit */
+        MonoTypeEnum::MONO_TYPE_I8 | MonoTypeEnum::MONO_TYPE_I => {
+            emit_integer_size!(i64, field_offset, rdi, QWORD, assembler);
+        }
+        MonoTypeEnum::MONO_TYPE_U1 => {
+            emit_integer_size!(u8, field_offset, dil, BYTE, assembler);
+        }
+        MonoTypeEnum::MONO_TYPE_U2 => {
+            emit_integer_size!(u16, field_offset, di, WORD, assembler);
+        }
+        MonoTypeEnum::MONO_TYPE_U4 => {
+            emit_integer_size!(u32, field_offset, edi, DWORD, assembler);
+        }
+        /* FIXME: So far, we're only running on 64 bit */
+        MonoTypeEnum::MONO_TYPE_U8 | MonoTypeEnum::MONO_TYPE_U => {
+            emit_integer_size!(u64, field_offset, rdi, QWORD, assembler);
+        }
+        MonoTypeEnum::MONO_TYPE_R4 => {
+            json_dynasm!(assembler
+                ; movss xmm0, DWORD [object + field_offset]
+                ; mov temp, QWORD calc_float_size::<f32> as _
+                ; call temp
+                ; add buffer, retval
+            );
+        }
+        MonoTypeEnum::MONO_TYPE_R8 => {
+            json_dynasm!(assembler
+                ; movsd xmm0, QWORD [object + field_offset]
+                ; movabs rax, QWORD calc_float_size::<f64> as i64
+                ; call temp
+                ; add buffer, retval
+            );
+        }
+        MonoTypeEnum::MONO_TYPE_STRING => {
+            json_dynasm!(assembler
+                ; mov rdi, QWORD [object + field_offset]
+                ; test rdi, rdi
+                ; je >null
+
+                ;;utf16::emit_string_size(assembler)
+
+                ;null:
+            );
+            return 2;
+        }
+        MonoTypeEnum::MONO_TYPE_VALUETYPE => {
+            json_dynasm!(assembler
+                ; push object
+                ; push object
+                ; lea object, [object + field_offset - 0x10]
+            );
+
+            let base_size = emit_calc_class(&*(*typ).klass, assembler);
+
+            json_dynasm!(assembler
+                ; pop object
+                ; pop object
+            );
+
+            return base_size;
+        }
+        MonoTypeEnum::MONO_TYPE_CLASS => {
+            let null_label = assembler.new_dynamic_label();
+            json_dynasm!(assembler
+                ; push object
+                ; push object
+
+                ; mov object, [object + field_offset]
+                ; test object, object
+                ; je =>null_label
+
+                ;;let base_size = emit_calc_class(&*(*typ).klass, assembler)
+                ; add buffer, base_size as _
+                ; jmp >exit
+                ;=>null_label
+                ; add buffer, 4
+
+                ;exit:
+                ; pop object
+                ; pop object
+            );
+        }
+        MonoTypeEnum::MONO_TYPE_SZARRAY => {
+            emit_array_size(field_offset, &*(*typ).klass, assembler);
+            return 2;
+        }
+        _ => {
+            return 4;
+        }
+    }
+    0
+}
+
+unsafe fn emit_calc_class(klass: *const MonoClass, assembler: &mut Assembler) -> usize {
+    let mut size = 0;
+
+    let mut iter = ptr::null();
+    loop {
+        let field = mono_class_get_fields(klass, &mut iter as _);
+        if field.is_null() {
+            break;
+        }
+
+        let typ = mono_field_get_type(field);
+        let attrs = (*typ).attrs;
+        // MONO_FIELD_ATTR_STATIC | MONO_FIELD_ATTR_NOT_SERIALIZED | MONO_FIELD_ATTR_PRIVATE
+        if (attrs & 0x91) != 0 {
+            continue;
+        }
+
+        let cstr = CStr::from_ptr((*field).name as _);
+        size += if let Ok(name) = cstr.to_str() {
+            name.len() + "\"\":".len()
+        } else {
+            format!("{cstr:?}:").len()
+        } + 1;
+
+        size += emit_calc_value(typ, (*field).offset, assembler);
+    }
+
+    size + 1
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn emit_length(obj: *const MonoObject) -> *mut ExecutableBuffer {
     let mut assembler = dynasmrt::x64::Assembler::new().unwrap();
 
-    json_dynasm!(assembler
-        ; mov object, rdi
-    );
+    let klass = mono_object_get_class(obj);
 
-    let _ = obj;
+    json_dynasm!(assembler
+        /* store non-volatile registers */
+        ; push object
+        ; push buffer
+        ; push rax
+
+        ; xor buffer, buffer
+
+        ; mov object, rdi
+        ; test object, object
+        ; je >null_root
+
+        ;;let base_size = emit_calc_class(klass, &mut assembler)
+        ; add buffer, base_size as _
+
+        ; pop rax
+        ; mov rax, buffer
+
+        ; pop buffer
+        ; pop object
+
+        ; ret
+
+        ;null_root:
+        ; mov rax, "{}\0".len() as _
+
+        /* restore non-volatile registers */
+        ; pop rax
+        ; pop buffer
+        ; pop object
+
+        ; ret
+    );
 
     let block = assembler.finalize().unwrap();
 
@@ -526,15 +799,6 @@ mod tests {
                 assert_eq!($exp, string);
             }
         };
-    }
-
-    #[test]
-    fn null() {
-        let mut assembler = dynasmrt::x64::Assembler::new().unwrap();
-
-        emit_null(&mut assembler);
-
-        gen_test!(0 as usize, "null", assembler);
     }
 
     #[test]
