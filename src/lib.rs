@@ -3,7 +3,7 @@ mod mono;
 use dynasmrt::*;
 use mono::*;
 
-use std::{alloc, arch::asm, ffi::CStr, ops::Shl, ptr};
+use std::{alloc, arch::asm, ffi::CStr, ptr};
 
 macro_rules! json_dynasm {
     ($ops:ident $($t:tt)*) => {
@@ -154,53 +154,69 @@ unsafe extern "sysv64" fn calc_integer_size<I: itoa::Integer>(value: I) -> usize
 }
 
 /**
- * Pack strings into 32 and 16 bit moves instead of
+ * Pack strings into 64, 32 and 16 bit moves instead of
  * looping over very string.
  */
 fn emit_string_copy(string: &str, assembler: &mut Assembler) {
-    fn pack32(s: &[u8], off: usize) -> u32 {
-        (s[off + 3] as u32).shl(0x18) as u32
-            | (s[off + 2] as u32).shl(0x10) as u32
-            | (s[off + 1] as u32).shl(0x08) as u32
-            | (s[off + 0] as u32).shl(0x00) as u32
+    macro_rules! pack {
+        ($ty:ty, $span:expr, $offset:expr) => {
+            <$ty>::from_le_bytes(unsafe {
+                $span
+                    .get_unchecked($offset..$offset + std::mem::size_of::<$ty>())
+                .try_into()
+                .unwrap_unchecked()
+            })
+        };
     }
-    fn pack16(s: &[u8], off: usize) -> u16 {
-        (s[off + 1] as u16).shl(0x08) as u16 | (s[off + 0] as u16).shl(0x00) as u16
+
+    macro_rules! emit_mov {
+        ($offset:expr, $width:ident, $value:expr) => {
+            if ($offset == 0) {
+                json_dynasm!(assembler
+                    ; mov $width [buffer], $value
+                );
+            } else {
+                json_dynasm!(assembler
+                    ; mov $width [buffer + $offset as _], $value
+                );
+            }
+        };
     }
 
     let s: &[u8] = string.as_bytes();
-    if s.len() >= 4 {
-        let mut off: usize = 0;
-        while (off + 4) < s.len() {
-            let value = pack32(s, off);
+    let mut offset: usize = 0;
+
+    while offset + 8 <= s.len() {
             json_dynasm!(assembler
-                ; mov DWORD [buffer + off as _], value as _
-            );
-            off += 4
-        }
-        if off < s.len() {
-            let start = s.len() - 4;
-            let value = pack32(s, start);
+            ; mov temp, QWORD pack!(u64, s, offset) as i64
+        );
+
+        if offset == 0 {
             json_dynasm!(assembler
-                ; mov DWORD [buffer + start as _], value as _
+                ; mov QWORD [buffer], temp
+            );
+        } else {
+            json_dynasm!(assembler
+            ; mov QWORD [buffer + offset as i32], temp
             );
         }
-    } else if s.len() == 3 {
-        let value = pack16(s, 0);
-        json_dynasm!(assembler
-            ; mov WORD [buffer], value as _
-            ; mov BYTE [buffer + 2], s[2] as _
-        );
-    } else if s.len() == 2 {
-        let value = pack16(s, 0);
-        json_dynasm!(assembler
-            ; mov WORD [buffer], value as _
-        );
-    } else {
-        json_dynasm!(assembler
-            ; mov BYTE [buffer], s[0] as _
-        );
+        offset += 8;
+        }
+
+    if offset + 4 <= s.len() {
+        emit_mov!(offset, DWORD, pack!(u32, s, offset) as i32);
+        offset += 4;
+        }
+
+    if offset + 2 <= s.len() {
+        emit_mov!(offset, WORD, pack!(u16, s, offset) as i16);
+        offset += 2;
     }
+
+    if offset < s.len() {
+        emit_mov!(offset, BYTE, s[offset] as i8);
+    }
+
     json_dynasm!(assembler
         ; add buffer, s.len() as _
     );
