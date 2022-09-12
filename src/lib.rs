@@ -541,7 +541,7 @@ unsafe fn emit_calc_value(typ: *const MonoType, field_offset: i32, assembler: &m
         MonoTypeEnum::MONO_TYPE_R8 => {
             json_dynasm!(assembler
                 ; movsd xmm0, QWORD [object + field_offset]
-                ; movabs rax, QWORD calc_float_size::<f64> as i64
+                ; mov temp, QWORD calc_float_size::<f64> as _
                 ; call temp
                 ; add buffer, retval
             );
