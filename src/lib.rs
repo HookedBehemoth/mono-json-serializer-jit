@@ -331,7 +331,7 @@ unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assemble
             )
         };
     }
-    
+
     match (*typ).typ {
         MonoTypeEnum::MONO_TYPE_BOOLEAN => {
             emit_boolean(field_offset, assembler);
@@ -480,7 +480,11 @@ unsafe fn emit_serialize_class(klass: *const MonoClass, assembler: &mut Assemble
     emit_string_copy("}", assembler);
 }
 
-unsafe fn emit_calc_value(typ: *const MonoType, field_offset: i32, assembler: &mut Assembler) -> usize {
+unsafe fn emit_calc_value(
+    typ: *const MonoType,
+    field_offset: i32,
+    assembler: &mut Assembler,
+) -> usize {
     macro_rules! emit_integer_size {
         ($ty:ty, $offset:expr, $reg:ident, $width:expr, $assembler:ident) => {
             json_dynasm!($assembler
@@ -491,7 +495,7 @@ unsafe fn emit_calc_value(typ: *const MonoType, field_offset: i32, assembler: &m
             )
         };
     }
-    
+
     match (*typ).typ {
         MonoTypeEnum::MONO_TYPE_BOOLEAN => {
             json_dynasm!(assembler
