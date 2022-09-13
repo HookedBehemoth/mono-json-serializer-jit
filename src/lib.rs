@@ -1,13 +1,25 @@
+mod array;
+mod boolean;
+mod float;
+mod integer;
 mod mono;
+mod strings;
+mod utf16_to_utf8;
 
-use dynasmrt::*;
+use array::{emit_szarray, emit_szarray_size};
+use boolean::emit_boolean;
 use mono::*;
+use dynasmrt::*;
+use float::{emit_f32, emit_f32_size, emit_f64, emit_f64_size};
+use strings::emit_string_copy;
+use utf16_to_utf8::{emit_char, emit_char_length, emit_string, emit_string_size};
 
 use std::{alloc, arch::asm, ffi::CStr, ptr};
 
+#[macro_export]
 macro_rules! json_dynasm {
     ($ops:ident $($t:tt)*) => {
-        dynasm!($ops
+        dynasmrt::dynasm!($ops
             ; .arch x64
 
             ; .alias object, r15
@@ -24,350 +36,15 @@ macro_rules! json_dynasm {
     }
 }
 
-type Assembler = dynasmrt::Assembler<x64::X64Relocation>;
-
-unsafe fn emit_boolean(field_offset: i32, assembler: &mut Assembler) {
-    json_dynasm!(assembler
-        ; mov temp_8, BYTE [object + field_offset]
-        ; test temp_8, temp_8
-        ; je >not
-        ;;emit_string_copy("true", assembler)
-        ; jmp >exit
-        ;not:
-        ;;emit_string_copy("false", assembler)
-        ; exit:
-    );
-}
-
-#[cfg(feature = "utf")]
-mod utf16 {
-    use dynasmrt::*;
-
-    pub unsafe extern "sysv64" fn push_string(s: *const crate::MonoString, dst: *mut u8) -> usize {
-        simdutf::convert_valid_utf16le_to_utf8(&(*s).chars as *const u16, (*s).length as _, dst)
-    }
-
-    pub unsafe extern "sysv64" fn push_char(s: *const u16, dst: *mut u8) -> usize {
-        simdutf::convert_valid_utf16le_to_utf8(s, 1, dst)
-    }
-
-    pub unsafe extern "sysv64" fn calc_string_size(s: *const crate::MonoString) -> usize {
-        let slice = std::slice::from_raw_parts(&(*s).chars as *const u16, (*s).length as _);
-        simdutf::count_utf8_from_utf16le(slice)
-    }
-
-    pub unsafe extern "sysv64" fn calc_char_size(s: *const u16) -> usize {
-        let slice = std::slice::from_raw_parts(s, 1);
-        simdutf::count_utf8_from_utf16le(slice)
-    }
-
-    pub fn emit_char(field_offset: i32, assembler: &mut crate::Assembler) {
-        json_dynasm!(assembler
-            ;;crate::emit_string_copy("\"", assembler)
-
-            ; lea rdi, [object + field_offset]
-            ; mov rsi, buffer
-            ; mov temp, QWORD push_char as _
-            ; call temp
-            ; add buffer, retval
-
-            ;;crate::emit_string_copy("\"", assembler)
-        );
-    }
-
-    pub fn emit_string_size(assembler: &mut crate::Assembler) {
-        json_dynasm!(assembler
-            ; mov temp, QWORD calc_string_size as _
-            ; call temp
-            ; add buffer, retval
-        );
-    }
-
-    pub fn emit_char_length(field_offset: i32, assembler: &mut crate::Assembler) {
-        json_dynasm!(assembler
-            ; lea rdi, [object + field_offset]
-            ; mov temp, QWORD calc_char_size as _
-            ; call temp
-            ; add buffer, retval
-        );
-    }
-}
-#[cfg(not(feature = "utf"))]
-mod utf16 {
-    use dynasmrt::*;
-
-    pub unsafe extern "sysv64" fn push_string(s: *const crate::MonoString, dst: *mut u8) -> usize {
-        for i in 0..((*s).length as usize) {
-            *dst.add(i) = *(&(*s).chars as *const u16).add(i) as _;
-        }
-        (*s).length as _
-    }
-
-    pub fn emit_char(field_offset: i32, assembler: &mut crate::Assembler) {
-        json_dynasm!(assembler
-            ;;crate::emit_string_copy("\"", assembler)
-            ; mov temp_8, [object + field_offset]
-            ; mov BYTE [buffer], temp_8
-            ; add buffer, BYTE 1
-            ;;crate::emit_string_copy("\"", assembler)
-        );
-    }
-
-    pub fn emit_string_size(assembler: &mut crate::Assembler) {
-        json_dynasm!(assembler
-            ; mov rdi, [rdi + 0x18]
-            ; add buffer, rdi
-        );
-    }
-
-    pub fn emit_char_length(_: i32, assembler: &mut crate::Assembler) {
-        json_dynasm!(assembler
-            ; add buffer, BYTE 1
-        );
-    }
-}
-
-unsafe extern "sysv64" fn push_float<F: ryu::Float>(value: F, dst: *mut u8) -> usize {
-    let mut buffer = ryu::Buffer::new();
-    let printed = buffer.format(value);
-    ptr::copy_nonoverlapping(printed.as_ptr(), dst, printed.len());
-    printed.len()
-}
-
-unsafe extern "sysv64" fn calc_float_size<F: ryu::Float>(value: F) -> usize {
-    let mut buffer = ryu::Buffer::new();
-    let printed = buffer.format(value);
-    printed.len()
-}
-
-unsafe extern "sysv64" fn push_integer<I: itoa::Integer>(value: I, dst: *mut u8) -> usize {
-    let mut buffer = itoa::Buffer::new();
-    let printed = buffer.format(value);
-    ptr::copy_nonoverlapping(printed.as_ptr(), dst, printed.len());
-    printed.len()
-}
-
-unsafe extern "sysv64" fn calc_integer_size<I: itoa::Integer>(value: I) -> usize {
-    let mut buffer = itoa::Buffer::new();
-    let printed = buffer.format(value);
-    printed.len()
-}
-
-/**
- * Pack strings into 64, 32 and 16 bit moves instead of
- * looping over very string.
- */
-fn emit_string_copy(string: &str, assembler: &mut Assembler) {
-    macro_rules! pack {
-        ($ty:ty, $span:expr, $offset:expr) => {
-            <$ty>::from_le_bytes(unsafe {
-                $span
-                    .get_unchecked($offset..$offset + std::mem::size_of::<$ty>())
-                    .try_into()
-                    .unwrap_unchecked()
-            })
-        };
-    }
-
-    macro_rules! emit_mov {
-        ($offset:expr, $width:ident, $value:expr) => {
-            if ($offset == 0) {
-                json_dynasm!(assembler
-                    ; mov $width [buffer], $value
-                );
-            } else {
-                json_dynasm!(assembler
-                    ; mov $width [buffer + $offset as _], $value
-                );
-            }
-        };
-    }
-
-    let s: &[u8] = string.as_bytes();
-    let mut offset: usize = 0;
-
-    while offset + 8 <= s.len() {
-        json_dynasm!(assembler
-            ; mov temp, QWORD pack!(u64, s, offset) as i64
-        );
-
-        if offset == 0 {
-            json_dynasm!(assembler
-                ; mov QWORD [buffer], temp
-            );
-        } else {
-            json_dynasm!(assembler
-                ; mov QWORD [buffer + offset as i32], temp
-            );
-        }
-        offset += 8;
-    }
-
-    if offset + 4 <= s.len() {
-        emit_mov!(offset, DWORD, pack!(u32, s, offset) as i32);
-        offset += 4;
-    }
-
-    if offset + 2 <= s.len() {
-        emit_mov!(offset, WORD, pack!(u16, s, offset) as i16);
-        offset += 2;
-    }
-
-    if offset < s.len() {
-        emit_mov!(offset, BYTE, s[offset] as i8);
-    }
-
-    if s.len() > 255 {
-        json_dynasm!(assembler
-            ; add buffer, WORD s.len() as _
-        );
-    } else {
-        json_dynasm!(assembler
-            ; add buffer, BYTE s.len() as _
-        );
-    }
-}
-
-unsafe fn emit_array(field_offset: i32, eclass: *const MonoClass, assembler: &mut Assembler) {
-    let stride = mono_class_array_element_size(eclass);
-    let typ = mono_class_get_type(eclass);
-
-    let empty_label = assembler.new_dynamic_label();
-    let repeat_label = assembler.new_dynamic_label();
-    json_dynasm!(assembler
-        ; push object
-        ; push r12
-        ; push r13
-
-        /* load object */
-        ; mov object, [object + field_offset]
-
-        /* check for null */
-        ; test object, object
-        ; je =>empty_label
-
-        /* skip empty arrays */
-        ; mov r13d, DWORD [object + 0x18]
-        ; test r13, r13
-        ; je =>empty_label
-
-        ;;emit_string_copy("[", assembler)
-
-        /* loop init */
-        ; lea object, [object + 0x20]
-        ; xor r12, r12
-        ; jmp >push
-
-        /* push comma starting with the second item */
-        ;=>repeat_label
-        ;;emit_string_copy(",", assembler)
-
-        /* serialize value */
-        ;push:
-        ; push object
-        ;;emit_serialize_value(typ, 0, assembler)
-        ; pop object
-
-        /* move to next object and increment counter */
-        ; add object, stride
-        ; add r12, BYTE 1
-        ; cmp r12, r13
-        ; jb =>repeat_label
-
-        ;;emit_string_copy("]", assembler)
-        ; jmp >exit
-
-        /* push empty array */
-        ;=>empty_label
-        ;;emit_string_copy("[]", assembler)
-
-        ;exit:
-        ; pop r13
-        ; pop r12
-        ; pop object
-    );
-}
-
-unsafe fn emit_array_size(field_offset: i32, eclass: *const MonoClass, assembler: &mut Assembler) {
-    let stride = mono_class_array_element_size(eclass);
-    let typ = mono_class_get_type(eclass);
-
-    let exit_label = assembler.new_dynamic_label();
-    let repeat_label = assembler.new_dynamic_label();
-    json_dynasm!(assembler
-        ; push object
-        ; push r12
-        ; push r13
-
-        /* load object */
-        ; mov object, [object + field_offset]
-
-        /* check for null */
-        ; test object, object
-        ; je =>exit_label
-
-        /* skip empty arrays */
-        ; mov r13d, DWORD [object + 0x18]
-        ; test r13, r13
-        ; je =>exit_label
-
-        /* loop init */
-        ; lea object, [object + 0x20]
-        ; xor r12, r12
-
-        /* push comma starting with the second item */
-        ;=>repeat_label
-
-        /* serialize value */
-        ; push object
-        ;;let base_size = emit_calc_value(typ, 0, assembler)
-        ; add buffer, base_size as _
-        ; pop object
-
-        /* move to next object and increment counter */
-        ; add object, stride
-        ; add r12, BYTE 1
-        ; cmp r12, r13
-        ; jb =>repeat_label
-
-        /* commas */
-        ; add buffer, r13
-        ; sub buffer, BYTE 1
-
-        ;=>exit_label
-        ; pop r13
-        ; pop r12
-        ; pop object
-    );
-}
+pub type Assembler = dynasmrt::Assembler<x64::X64Relocation>;
 
 unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assembler: &mut Assembler) {
-    macro_rules! emit_integer {
-        ($ty:ty, $offset:expr, $mov:ident, $reg:ident, $width:expr, $assembler:ident) => {
-            if $offset == 0 {
-                json_dynasm!($assembler
-                    ; $mov $reg, $width [object]
-                );
-            } else {
-                json_dynasm!($assembler
-                    ; $mov $reg, $width [object + $offset]
-                );
-            }
-            json_dynasm!($assembler
-                ; mov rsi, buffer
-                ; mov temp, QWORD push_integer::<$ty> as _
-                ; call temp
-                ; add buffer, retval
-            )
-        };
-    }
-
     match (*typ).typ {
         MonoTypeEnum::MONO_TYPE_BOOLEAN => {
             emit_boolean(field_offset, assembler);
         }
         MonoTypeEnum::MONO_TYPE_CHAR => {
-            utf16::emit_char(field_offset, assembler);
+            emit_char(field_offset, assembler);
         }
         MonoTypeEnum::MONO_TYPE_I1 => {
             emit_integer!(i8, field_offset, movsx, edi, BYTE, assembler);
@@ -396,76 +73,13 @@ unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assemble
             emit_integer!(u64, field_offset, mov, rdi, QWORD, assembler);
         }
         MonoTypeEnum::MONO_TYPE_R4 => {
-            json_dynasm!(assembler
-                ; movss xmm0, DWORD [object + field_offset]
-
-                /* Check for 0.0 */
-                ; xorps xmm1, xmm1
-                ; ucomiss xmm0, xmm1
-                ; jne BYTE >some
-                ; jp BYTE >some
-                ;;emit_string_copy("0.0", assembler)
-                ; jmp BYTE >end
-
-                ;some:
-                ; mov rdi, buffer
-                ; mov temp, QWORD push_float::<f32> as _
-                ; call temp
-                ; add buffer, retval
-
-                ;end:
-            );
+            emit_f32(field_offset, assembler);
         }
         MonoTypeEnum::MONO_TYPE_R8 => {
-            json_dynasm!(assembler
-                ; movsd xmm0, QWORD [object + field_offset]
-
-                /* Check for 0.0 */
-                ; xorpd xmm1, xmm1
-                ; ucomisd xmm0, xmm1
-                ; jne BYTE >some
-                ; jp BYTE >some
-                ;;emit_string_copy("0.0", assembler)
-                ; jmp BYTE >end
-
-                ;some:
-                ; mov rdi, buffer
-                ; mov temp, QWORD push_float::<f64> as _
-                ; call temp
-                ; add buffer, retval
-
-                ;end:
-            );
+            emit_f64(field_offset, assembler);
         }
         MonoTypeEnum::MONO_TYPE_STRING => {
-            if field_offset == 0 {
-                json_dynasm!(assembler
-                    ; mov rdi, QWORD [object]
-                );
-            } else {
-                json_dynasm!(assembler
-                    ; mov rdi, QWORD [object + field_offset]
-                );
-            }
-            json_dynasm!(assembler
-                ; test rdi, rdi
-                ; je BYTE >null
-                ; mov temp_32, [rdi + 0x10]
-                ; test temp, temp
-                ; je BYTE >null
-                ;;emit_string_copy("\"", assembler)
-
-                ; mov rsi, buffer
-                ; mov temp, QWORD utf16::push_string as _
-                ; call temp
-
-                ; add buffer, retval
-                ;;emit_string_copy("\"", assembler)
-                ; jmp BYTE >exit
-                ;null:
-                ;;emit_string_copy("\"\"", assembler)
-                ;exit:
-            );
+            emit_string(field_offset, assembler);
         }
         MonoTypeEnum::MONO_TYPE_VALUETYPE => {
             json_dynasm!(assembler
@@ -507,7 +121,7 @@ unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assemble
             );
         }
         MonoTypeEnum::MONO_TYPE_SZARRAY => {
-            emit_array(field_offset, &*(*typ).klass, assembler);
+            emit_szarray(field_offset, &*(*typ).klass, assembler);
         }
         _ => {
             emit_string_copy("null", assembler);
@@ -557,25 +171,6 @@ unsafe fn emit_calc_value(
     field_offset: i32,
     assembler: &mut Assembler,
 ) -> usize {
-    macro_rules! emit_integer_size {
-        ($ty:ty, $offset:expr, $mov:ident, $reg:ident, $width:expr, $assembler:ident) => {
-            if $offset == 0 {
-                json_dynasm!($assembler
-                    ; $mov $reg, $width [object]
-                );
-            } else {
-                json_dynasm!($assembler
-                    ; $mov $reg, $width [object + $offset]
-                );
-            }
-            json_dynasm!($assembler
-                ; mov temp, QWORD calc_integer_size::<$ty> as _
-                ; call temp
-                ; add buffer, retval
-            )
-        };
-    }
-
     match (*typ).typ {
         MonoTypeEnum::MONO_TYPE_BOOLEAN => {
             json_dynasm!(assembler
@@ -585,7 +180,7 @@ unsafe fn emit_calc_value(
             return 5;
         }
         MonoTypeEnum::MONO_TYPE_CHAR => {
-            utf16::emit_char_length(field_offset, assembler);
+            emit_char_length(field_offset, assembler);
             return 2;
         }
         MonoTypeEnum::MONO_TYPE_I1 => {
@@ -615,66 +210,13 @@ unsafe fn emit_calc_value(
             emit_integer_size!(u64, field_offset, mov, rdi, QWORD, assembler);
         }
         MonoTypeEnum::MONO_TYPE_R4 => {
-            json_dynasm!(assembler
-                ; movss xmm0, DWORD [object + field_offset]
-
-                /* Check for 0.0 */
-                ; xorps xmm1, xmm1
-                ; ucomiss xmm0, xmm1
-                ; jne BYTE >some
-                ; jp BYTE >some
-                ; add buffer, BYTE 3
-                ; jmp BYTE >end
-
-                ;some:
-                ; mov temp, QWORD calc_float_size::<f32> as _
-                ; call temp
-                ; add buffer, retval
-
-                ;end:
-            );
+            emit_f32_size(field_offset, assembler);
         }
         MonoTypeEnum::MONO_TYPE_R8 => {
-            json_dynasm!(assembler
-                ; movsd xmm0, QWORD [object + field_offset]
-
-                /* Check for 0.0 */
-                ; xorpd xmm1, xmm1
-                ; ucomisd xmm0, xmm1
-                ; jne BYTE >some
-                ; jp BYTE >some
-                ; add buffer, BYTE 3
-                ; jmp BYTE >end
-
-                ;some:
-                ; mov temp, QWORD calc_float_size::<f64> as _
-                ; call temp
-                ; add buffer, retval
-
-                ;end:
-            );
+            emit_f64_size(field_offset, assembler);
         }
         MonoTypeEnum::MONO_TYPE_STRING => {
-            if field_offset == 0 {
-                json_dynasm!(assembler
-                    ; mov rdi, QWORD [object]
-                );
-            } else {
-                json_dynasm!(assembler
-                    ; mov rdi, QWORD [object + field_offset]
-                );
-            }
-            json_dynasm!(assembler
-                ; test rdi, rdi
-                ; je BYTE >null
-                ; mov temp_32, [rdi + 0x10]
-                ; test temp, temp
-                ; je BYTE >null
-
-                ;;utf16::emit_string_size(assembler)
-
-                ;null:
-            );
+            emit_string_size(field_offset, assembler);
             return 2;
         }
         MonoTypeEnum::MONO_TYPE_VALUETYPE => {
@@ -720,7 +262,7 @@ unsafe fn emit_calc_value(
             );
         }
         MonoTypeEnum::MONO_TYPE_SZARRAY => {
-            emit_array_size(field_offset, &*(*typ).klass, assembler);
+            emit_szarray_size(field_offset, &*(*typ).klass, assembler);
             return 2;
         }
         _ => {

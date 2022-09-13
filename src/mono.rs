@@ -120,10 +120,3 @@ fn test_sizes() {
     assert_eq!(size_of::<MonoObject>(), 0x10);
     assert_eq!(size_of::<MonoString>(), 0x18);
 }
-
-extern "C" {
-	// pub i_enumerable_get: extern "C" fn()
-}
-pub fn initialize() {
-
-}
