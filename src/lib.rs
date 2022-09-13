@@ -432,8 +432,16 @@ unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assemble
             );
         }
         MonoTypeEnum::MONO_TYPE_STRING => {
+            if field_offset == 0 {
+                json_dynasm!(assembler
+                    ; mov rdi, QWORD [object]
+                );
+            } else {
+                json_dynasm!(assembler
+                    ; mov rdi, QWORD [object + field_offset]
+                );
+            }
             json_dynasm!(assembler
-                ; mov rdi, QWORD [object + field_offset]
                 ; test rdi, rdi
                 ; je >null
                 ; mov temp_32, [rdi + 0x10]
@@ -457,10 +465,17 @@ unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assemble
             json_dynasm!(assembler
                 ; push object
                 ; push object
+            );
 
-                ; lea object, [object + field_offset - 0x10]
-                ;;emit_serialize_class(&*(*typ).klass, assembler)
+            if field_offset != 0x10 {
+                json_dynasm!(assembler
+                    ; lea object, [object + field_offset - 0x10]
+                );
+            }
 
+            emit_serialize_class(&*(*typ).klass, assembler);
+
+            json_dynasm!(assembler
                 ; pop object
                 ; pop object
             );
@@ -634,8 +649,16 @@ unsafe fn emit_calc_value(
             );
         }
         MonoTypeEnum::MONO_TYPE_STRING => {
+            if field_offset == 0 {
+                json_dynasm!(assembler
+                    ; mov rdi, QWORD [object]
+                );
+            } else {
+                json_dynasm!(assembler
+                    ; mov rdi, QWORD [object + field_offset]
+                );
+            }
             json_dynasm!(assembler
-                ; mov rdi, QWORD [object + field_offset]
                 ; test rdi, rdi
                 ; je >null
                 ; mov temp_32, [rdi + 0x10]
@@ -652,8 +675,13 @@ unsafe fn emit_calc_value(
             json_dynasm!(assembler
                 ; push object
                 ; push object
-                ; lea object, [object + field_offset - 0x10]
             );
+
+            if field_offset != 0x10 {
+                json_dynasm!(assembler
+                    ; lea object, [object + field_offset - 0x10]
+                );
+            }
 
             let base_size = emit_calc_class(&*(*typ).klass, assembler);
 
