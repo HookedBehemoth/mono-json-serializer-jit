@@ -47,6 +47,17 @@ unsafe fn escape_char(byte: u8, dst: *mut u8) -> usize {
     }
 }
 
+fn calc_char_size(byte: u8) -> usize {
+    let escape = ESCAPE[byte as usize];
+    if escape == 'u' as u8 {
+        6
+    } else if escape != 0 {
+        2
+    } else {
+        1
+    }
+}
+
 unsafe extern "sysv64" fn push_string(data: *const u16, len: usize, dst: *mut u8) -> usize {
     let mut pos = 0;
     let mut utf8_output = dst;
@@ -116,26 +127,52 @@ unsafe extern "sysv64" fn push_string(data: *const u16, len: usize, dst: *mut u8
 }
 
 unsafe extern "sysv64" fn calc_string_size(data: *const u16, len: usize) -> usize {
-    std::slice::from_raw_parts(data, len)
-        .iter()
-        .fold(0, |c, &word| {
-            if word <= 0x7f {
-                let escape = ESCAPE[(word & 0x7f) as usize];
-                if escape == 'u' as u8 {
-                    c + 6
-                } else if escape != 0 {
-                    c + 2
-                } else {
-                    c + 1
+    let mut pos = 0;
+    let mut size = 0;
+
+    while pos < len {
+        if pos + 4 <= len {
+            let mut bytes = [0u8; 8];
+            std::ptr::copy_nonoverlapping(data.add(pos) as *const u8, bytes.as_mut_ptr(), 8);
+            let v = u64::from_le_bytes(bytes);
+            if (v & 0xff80ff80ff80ff80) == 0 {
+                for i in pos..pos + 4 {
+                    let byte = (*data.add(i) & 0x7f) as u8;
+                    size += calc_char_size(byte);
                 }
-            } else if word <= 0x7ff {
-                c + 2
-            } else if word <= 0xd7ff || word >= 0xe00 {
-                c + 3
-            } else {
-                c + 2
+                pos += 4;
+                continue;
             }
-        })
+        }
+        let word = *data.add(pos);
+        if (word & 0xFF80) == 0 {
+            size += calc_char_size((word & 0x7f) as u8);
+            pos += 1;
+        } else if (word & 0xf800) == 0 {
+            size += 2;
+            pos += 1;
+        } else if (word & 0xf800) != 0xd800 {
+            size += 3;
+            pos += 1;
+        } else {
+            if pos + 1 > len {
+                return 0;
+            }
+            let diff = word - 0xd800;
+            if diff > 0x3ff {
+                return 0;
+            }
+            let next_word = *data.add(pos + 1);
+            let diff2 = next_word - 0xdc00;
+            if diff2 > 0x3ff {
+                return 0;
+            }
+            size += 4;
+            pos += 2;
+        }
+    }
+
+    size
 }
 
 pub fn emit_string(field_offset: i32, assembler: &mut Assembler) {
@@ -219,4 +256,32 @@ pub fn emit_char_length(field_offset: i32, assembler: &mut Assembler) {
         ; call temp
         ; add buffer, retval
     );
+}
+
+#[test]
+fn utf16_to_utf8() {
+    macro_rules! test_string {
+        ($str:expr, $exp:expr) => {
+            let val: Vec<u16> = $str.encode_utf16().collect();
+            println!("{:?}", val);
+            unsafe {
+                let expected_length = calc_string_size(val.as_ptr(), val.len());
+                let mut dst = [0u8; $exp.len()];
+                let length = push_string(val.as_ptr(), val.len(), dst.as_mut_ptr());
+                assert_eq!(length, expected_length);
+                assert_eq!(String::from_utf8_lossy(&dst[..length]), $exp);
+            };
+        };
+    }
+    test_string!("😭", "😭");
+    test_string!("\n", "\\n");
+    test_string!("\t", "\\t");
+    test_string!("\"", "\\\"");
+    test_string!("\\", "\\\\");
+    test_string!("\u{0}", "\\u0000");
+    test_string!("\u{8}", "\\b");
+    test_string!("\u{9}", "\\t");
+    test_string!("\u{c}", "\\f");
+    test_string!("\u{d}", "\\r");
+    test_string!("😭\n\t\"\\\u{0}\u{8}\u{9}\u{c}\u{d}", "😭\\n\\t\\\"\\\\\\u0000\\b\\t\\f\\r");
 }
