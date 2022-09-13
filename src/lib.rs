@@ -163,8 +163,8 @@ fn emit_string_copy(string: &str, assembler: &mut Assembler) {
             <$ty>::from_le_bytes(unsafe {
                 $span
                     .get_unchecked($offset..$offset + std::mem::size_of::<$ty>())
-                .try_into()
-                .unwrap_unchecked()
+                    .try_into()
+                    .unwrap_unchecked()
             })
         };
     }
@@ -187,7 +187,7 @@ fn emit_string_copy(string: &str, assembler: &mut Assembler) {
     let mut offset: usize = 0;
 
     while offset + 8 <= s.len() {
-            json_dynasm!(assembler
+        json_dynasm!(assembler
             ; mov temp, QWORD pack!(u64, s, offset) as i64
         );
 
@@ -197,16 +197,16 @@ fn emit_string_copy(string: &str, assembler: &mut Assembler) {
             );
         } else {
             json_dynasm!(assembler
-            ; mov QWORD [buffer + offset as i32], temp
+                ; mov QWORD [buffer + offset as i32], temp
             );
         }
         offset += 8;
-        }
+    }
 
     if offset + 4 <= s.len() {
         emit_mov!(offset, DWORD, pack!(u32, s, offset) as i32);
         offset += 4;
-        }
+    }
 
     if offset + 2 <= s.len() {
         emit_mov!(offset, WORD, pack!(u16, s, offset) as i16);
