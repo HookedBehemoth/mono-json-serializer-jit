@@ -1,5 +1,3 @@
-
-
 pub unsafe extern "sysv64" fn push_integer<I: itoa::Integer>(value: I, dst: *mut u8) -> usize {
     let mut buffer = itoa::Buffer::new();
     let printed = buffer.format(value);

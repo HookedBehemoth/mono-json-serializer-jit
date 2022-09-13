@@ -8,9 +8,9 @@ mod utf16_to_utf8;
 
 use array::{emit_szarray, emit_szarray_size};
 use boolean::emit_boolean;
-use mono::*;
 use dynasmrt::*;
 use float::{emit_f32, emit_f32_size, emit_f64, emit_f64_size};
+use mono::*;
 use strings::emit_string_copy;
 use utf16_to_utf8::{emit_char, emit_char_length, emit_string, emit_string_size};
 
@@ -429,6 +429,7 @@ pub unsafe extern "C" fn destroy(code: *mut ExecutableBuffer) {
     alloc::dealloc(code as *mut u8, alloc::Layout::new::<ExecutableBuffer>());
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -721,3 +722,4 @@ mod tests {
         );
     }
 }
+*/
