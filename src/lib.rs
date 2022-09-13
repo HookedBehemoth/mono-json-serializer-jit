@@ -468,7 +468,6 @@ pub unsafe extern "C" fn destroy(code: *mut ExecutableBuffer) {
     alloc::dealloc(code as *mut u8, alloc::Layout::new::<ExecutableBuffer>());
 }
 
-/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -514,15 +513,15 @@ mod tests {
         let value: &[i8] = &[i8::MIN, -1, 0, 1, i8::MAX];
         let width = 1;
 
-        emit_integer!(i8, 0 * width, dil, BYTE, assembler);
+        emit_integer!(i8, 0 * width, movsx, edi, BYTE, assembler);
         newline!(assembler);
-        emit_integer!(i8, 1 * width, dil, BYTE, assembler);
+        emit_integer!(i8, 1 * width, movsx, edi, BYTE, assembler);
         newline!(assembler);
-        emit_integer!(i8, 2 * width, dil, BYTE, assembler);
+        emit_integer!(i8, 2 * width, movsx, edi, BYTE, assembler);
         newline!(assembler);
-        emit_integer!(i8, 3 * width, dil, BYTE, assembler);
+        emit_integer!(i8, 3 * width, movsx, edi, BYTE, assembler);
         newline!(assembler);
-        emit_integer!(i8, 4 * width, dil, BYTE, assembler);
+        emit_integer!(i8, 4 * width, movsx, edi, BYTE, assembler);
 
         gen_test!(value.as_ptr() as usize, "-128\n-1\n0\n1\n127", assembler);
 
@@ -531,15 +530,15 @@ mod tests {
         let value: &[i16] = &[i16::MIN, -1, 0, 1, i16::MAX];
         let width = 2;
 
-        emit_integer!(i16, 0 * width, di, WORD, assembler);
+        emit_integer!(i16, 0 * width, movsx, edi, WORD, assembler);
         newline!(assembler);
-        emit_integer!(i16, 1 * width, di, WORD, assembler);
+        emit_integer!(i16, 1 * width, movsx, edi, WORD, assembler);
         newline!(assembler);
-        emit_integer!(i16, 2 * width, di, WORD, assembler);
+        emit_integer!(i16, 2 * width, movsx, edi, WORD, assembler);
         newline!(assembler);
-        emit_integer!(i16, 3 * width, di, WORD, assembler);
+        emit_integer!(i16, 3 * width, movsx, edi, WORD, assembler);
         newline!(assembler);
-        emit_integer!(i16, 4 * width, di, WORD, assembler);
+        emit_integer!(i16, 4 * width, movsx, edi, WORD, assembler);
 
         gen_test!(
             value.as_ptr() as usize,
@@ -552,15 +551,15 @@ mod tests {
         let value: &[i32] = &[i32::MIN, -1, 0, 1, i32::MAX];
         let width = 4;
 
-        emit_integer!(i32, 0 * width, edi, DWORD, assembler);
+        emit_integer!(i32, 0 * width, mov, edi, DWORD, assembler);
         newline!(assembler);
-        emit_integer!(i32, 1 * width, edi, DWORD, assembler);
+        emit_integer!(i32, 1 * width, mov, edi, DWORD, assembler);
         newline!(assembler);
-        emit_integer!(i32, 2 * width, edi, DWORD, assembler);
+        emit_integer!(i32, 2 * width, mov, edi, DWORD, assembler);
         newline!(assembler);
-        emit_integer!(i32, 3 * width, edi, DWORD, assembler);
+        emit_integer!(i32, 3 * width, mov, edi, DWORD, assembler);
         newline!(assembler);
-        emit_integer!(i32, 4 * width, edi, DWORD, assembler);
+        emit_integer!(i32, 4 * width, mov, edi, DWORD, assembler);
 
         gen_test!(
             value.as_ptr() as usize,
@@ -573,15 +572,15 @@ mod tests {
         let value: &[i64] = &[i64::MIN, -1, 0, 1, i64::MAX];
         let width = 8;
 
-        emit_integer!(i64, 0 * width, rdi, QWORD, assembler);
+        emit_integer!(i64, 0 * width, mov, rdi, QWORD, assembler);
         newline!(assembler);
-        emit_integer!(i64, 1 * width, rdi, QWORD, assembler);
+        emit_integer!(i64, 1 * width, mov, rdi, QWORD, assembler);
         newline!(assembler);
-        emit_integer!(i64, 2 * width, rdi, QWORD, assembler);
+        emit_integer!(i64, 2 * width, mov, rdi, QWORD, assembler);
         newline!(assembler);
-        emit_integer!(i64, 3 * width, rdi, QWORD, assembler);
+        emit_integer!(i64, 3 * width, mov, rdi, QWORD, assembler);
         newline!(assembler);
-        emit_integer!(i64, 4 * width, rdi, QWORD, assembler);
+        emit_integer!(i64, 4 * width, mov, rdi, QWORD, assembler);
 
         gen_test!(
             value.as_ptr() as usize,
@@ -594,11 +593,11 @@ mod tests {
         let value: &[u8] = &[u8::MIN, 42, u8::MAX];
         let width = 1;
 
-        emit_integer!(u8, 0 * width, dil, BYTE, assembler);
+        emit_integer!(u8, 0 * width, movzx, edi, BYTE, assembler);
         newline!(assembler);
-        emit_integer!(u8, 1 * width, dil, BYTE, assembler);
+        emit_integer!(u8, 1 * width, movzx, edi, BYTE, assembler);
         newline!(assembler);
-        emit_integer!(u8, 2 * width, dil, BYTE, assembler);
+        emit_integer!(u8, 2 * width, movzx, edi, BYTE, assembler);
 
         gen_test!(value.as_ptr() as usize, "0\n42\n255", assembler);
 
@@ -607,11 +606,11 @@ mod tests {
         let value: &[u16] = &[u16::MIN, 1337, u16::MAX];
         let width = 2;
 
-        emit_integer!(u16, 0 * width, di, WORD, assembler);
+        emit_integer!(u16, 0 * width, movzx, edi, WORD, assembler);
         newline!(assembler);
-        emit_integer!(u16, 1 * width, di, WORD, assembler);
+        emit_integer!(u16, 1 * width, movzx, edi, WORD, assembler);
         newline!(assembler);
-        emit_integer!(u16, 2 * width, di, WORD, assembler);
+        emit_integer!(u16, 2 * width, movzx, edi, WORD, assembler);
 
         gen_test!(value.as_ptr() as usize, "0\n1337\n65535", assembler);
 
@@ -620,11 +619,11 @@ mod tests {
         let value: &[u32] = &[u32::MIN, 1337, u32::MAX];
         let width = 4;
 
-        emit_integer!(u32, 0 * width, edi, DWORD, assembler);
+        emit_integer!(u32, 0 * width, mov, edi, DWORD, assembler);
         newline!(assembler);
-        emit_integer!(u32, 1 * width, edi, DWORD, assembler);
+        emit_integer!(u32, 1 * width, mov, edi, DWORD, assembler);
         newline!(assembler);
-        emit_integer!(u32, 2 * width, edi, DWORD, assembler);
+        emit_integer!(u32, 2 * width, mov, edi, DWORD, assembler);
 
         gen_test!(value.as_ptr() as usize, "0\n1337\n4294967295", assembler);
 
@@ -633,11 +632,11 @@ mod tests {
         let value: &[u64] = &[u64::MIN, 1337, u64::MAX];
         let width = 8;
 
-        emit_integer!(u64, 0 * width, rdi, QWORD, assembler);
+        emit_integer!(u64, 0 * width, mov, rdi, QWORD, assembler);
         newline!(assembler);
-        emit_integer!(u64, 1 * width, rdi, QWORD, assembler);
+        emit_integer!(u64, 1 * width, mov, rdi, QWORD, assembler);
         newline!(assembler);
-        emit_integer!(u64, 2 * width, rdi, QWORD, assembler);
+        emit_integer!(u64, 2 * width, mov, rdi, QWORD, assembler);
 
         gen_test!(
             value.as_ptr() as usize,
@@ -663,25 +662,25 @@ mod tests {
             f32::NEG_INFINITY,
         ];
 
-        emit_float(0 * 4, &mut assembler);
+        emit_f32(0 * 4, &mut assembler);
         newline!(assembler);
-        emit_float(1 * 4, &mut assembler);
+        emit_f32(1 * 4, &mut assembler);
         newline!(assembler);
-        emit_float(2 * 4, &mut assembler);
+        emit_f32(2 * 4, &mut assembler);
         newline!(assembler);
-        emit_float(3 * 4, &mut assembler);
+        emit_f32(3 * 4, &mut assembler);
         newline!(assembler);
-        emit_float(4 * 4, &mut assembler);
+        emit_f32(4 * 4, &mut assembler);
         newline!(assembler);
-        emit_float(5 * 4, &mut assembler);
+        emit_f32(5 * 4, &mut assembler);
         newline!(assembler);
-        emit_float(6 * 4, &mut assembler);
+        emit_f32(6 * 4, &mut assembler);
         newline!(assembler);
-        emit_float(7 * 4, &mut assembler);
+        emit_f32(7 * 4, &mut assembler);
         newline!(assembler);
-        emit_float(8 * 4, &mut assembler);
+        emit_f32(8 * 4, &mut assembler);
         newline!(assembler);
-        emit_float(9 * 4, &mut assembler);
+        emit_f32(9 * 4, &mut assembler);
 
         gen_test!(
             value.as_ptr() as usize,
@@ -707,25 +706,25 @@ mod tests {
             f64::NEG_INFINITY,
         ];
 
-        emit_double(0 * 8, &mut assembler);
+        emit_f64(0 * 8, &mut assembler);
         newline!(assembler);
-        emit_double(1 * 8, &mut assembler);
+        emit_f64(1 * 8, &mut assembler);
         newline!(assembler);
-        emit_double(2 * 8, &mut assembler);
+        emit_f64(2 * 8, &mut assembler);
         newline!(assembler);
-        emit_double(3 * 8, &mut assembler);
+        emit_f64(3 * 8, &mut assembler);
         newline!(assembler);
-        emit_double(4 * 8, &mut assembler);
+        emit_f64(4 * 8, &mut assembler);
         newline!(assembler);
-        emit_double(5 * 8, &mut assembler);
+        emit_f64(5 * 8, &mut assembler);
         newline!(assembler);
-        emit_double(6 * 8, &mut assembler);
+        emit_f64(6 * 8, &mut assembler);
         newline!(assembler);
-        emit_double(7 * 8, &mut assembler);
+        emit_f64(7 * 8, &mut assembler);
         newline!(assembler);
-        emit_double(8 * 8, &mut assembler);
+        emit_f64(8 * 8, &mut assembler);
         newline!(assembler);
-        emit_double(9 * 8, &mut assembler);
+        emit_f64(9 * 8, &mut assembler);
 
         gen_test!(
             value.as_ptr() as usize,
@@ -761,4 +760,3 @@ mod tests {
         );
     }
 }
-*/
