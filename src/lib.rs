@@ -384,25 +384,52 @@ unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assemble
         MonoTypeEnum::MONO_TYPE_R4 => {
             json_dynasm!(assembler
                 ; movss xmm0, DWORD [object + field_offset]
+
+                /* Check for 0.0 */
+                ; xorps xmm1, xmm1
+                ; ucomiss xmm0, xmm1
+                ; jne >some
+                ; jp >some
+                ;;emit_string_copy("0.0", assembler)
+                ; jmp >end
+
+                ;some:
                 ; mov rdi, buffer
                 ; mov temp, QWORD push_float::<f32> as _
                 ; call temp
                 ; add buffer, retval
+
+                ;end:
             );
         }
         MonoTypeEnum::MONO_TYPE_R8 => {
             json_dynasm!(assembler
                 ; movsd xmm0, QWORD [object + field_offset]
+
+                /* Check for 0.0 */
+                ; xorpd xmm1, xmm1
+                ; ucomisd xmm0, xmm1
+                ; jne >some
+                ; jp >some
+                ;;emit_string_copy("0.0\0", assembler)
+                ; jmp >end
+
+                ;some:
                 ; mov rdi, buffer
                 ; mov temp, QWORD push_float::<f64> as _
                 ; call temp
                 ; add buffer, retval
+
+                ;end:
             );
         }
         MonoTypeEnum::MONO_TYPE_STRING => {
             json_dynasm!(assembler
                 ; mov rdi, QWORD [object + field_offset]
                 ; test rdi, rdi
+                ; je >null
+                ; mov temp_32, [rdi + 0x10]
+                ; test temp, temp
                 ; je >null
                 ;;emit_string_copy("\"", assembler)
 
@@ -553,23 +580,50 @@ unsafe fn emit_calc_value(
         MonoTypeEnum::MONO_TYPE_R4 => {
             json_dynasm!(assembler
                 ; movss xmm0, DWORD [object + field_offset]
+
+                /* Check for 0.0 */
+                ; xorps xmm1, xmm1
+                ; ucomiss xmm0, xmm1
+                ; jne >some
+                ; jp >some
+                ; add buffer, 3
+                ; jmp >end
+
+                ;some:
                 ; mov temp, QWORD calc_float_size::<f32> as _
                 ; call temp
                 ; add buffer, retval
+
+                ;end:
             );
         }
         MonoTypeEnum::MONO_TYPE_R8 => {
             json_dynasm!(assembler
                 ; movsd xmm0, QWORD [object + field_offset]
+
+                /* Check for 0.0 */
+                ; xorpd xmm1, xmm1
+                ; ucomisd xmm0, xmm1
+                ; jne >some
+                ; jp >some
+                ; add buffer, 3
+                ; jmp >end
+
+                ;some:
                 ; mov temp, QWORD calc_float_size::<f64> as _
                 ; call temp
                 ; add buffer, retval
+
+                ;end:
             );
         }
         MonoTypeEnum::MONO_TYPE_STRING => {
             json_dynasm!(assembler
                 ; mov rdi, QWORD [object + field_offset]
                 ; test rdi, rdi
+                ; je >null
+                ; mov temp_32, [rdi + 0x10]
+                ; test temp, temp
                 ; je >null
 
                 ;;utf16::emit_string_size(assembler)
