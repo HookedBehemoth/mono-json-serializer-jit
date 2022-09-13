@@ -419,7 +419,7 @@ unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assemble
                 ; ucomisd xmm0, xmm1
                 ; jne >some
                 ; jp >some
-                ;;emit_string_copy("0.0\0", assembler)
+                ;;emit_string_copy("0.0", assembler)
                 ; jmp >end
 
                 ;some:
