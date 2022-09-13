@@ -2,18 +2,22 @@ mod array;
 mod boolean;
 mod float;
 mod integer;
+mod list;
 mod mono;
 mod strings;
 mod utf16_to_utf8;
 
-use array::{emit_szarray, emit_szarray_size};
-use boolean::emit_boolean;
-use dynasmrt::*;
-use float::{emit_f32, emit_f32_size, emit_f64, emit_f64_size};
-use mono::*;
-use strings::emit_string_copy;
-use utf16_to_utf8::{emit_char, emit_char_length, emit_string, emit_string_size};
+use crate::{
+    array::{emit_szarray, emit_szarray_size},
+    boolean::emit_boolean,
+    float::{emit_f32, emit_f32_size, emit_f64, emit_f64_size},
+    list::{emit_list, emit_list_size},
+    mono::*,
+    strings::emit_string_copy,
+    utf16_to_utf8::{emit_char, emit_char_length, emit_string, emit_string_size},
+};
 
+use dynasmrt::*;
 use std::{alloc, arch::asm, ffi::CStr, ptr};
 
 #[macro_export]
@@ -119,6 +123,23 @@ unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assemble
                 ; pop object
                 ; pop object
             );
+        }
+        MonoTypeEnum::MONO_TYPE_GENERICINST => {
+            let klass = mono_class_from_mono_type(typ);
+
+            let name = CStr::from_ptr(mono_class_get_name(klass) as _);
+            let ns = CStr::from_ptr(mono_class_get_namespace(klass) as _);
+
+            // Note: We only support the C# List type
+            match (ns.to_str(), name.to_str()) {
+                (Ok("System.Collections.Generic"), Ok("List`1")) => {
+                    emit_list(field_offset, klass, assembler)
+                }
+                _ => {
+                    dbg!("Unsupported generic type: {:?}::{:?}", ns, name);
+                    emit_string_copy("null", assembler);
+                }
+            }
         }
         MonoTypeEnum::MONO_TYPE_SZARRAY => {
             emit_szarray(field_offset, &*(*typ).klass, assembler);
@@ -260,6 +281,24 @@ unsafe fn emit_calc_value(
                 ; pop object
                 ; pop object
             );
+        }
+        MonoTypeEnum::MONO_TYPE_GENERICINST => {
+            let klass = mono_class_from_mono_type(typ);
+
+            let name = CStr::from_ptr(mono_class_get_name(klass) as _);
+            let ns = CStr::from_ptr(mono_class_get_namespace(klass) as _);
+
+            // Note: We only support the C# List type
+            match (ns.to_str(), name.to_str()) {
+                (Ok("System.Collections.Generic"), Ok("List`1")) => {
+                    emit_list_size(field_offset, klass, assembler);
+                    return 2;
+                }
+                _ => {
+                    dbg!("Unsupported generic type: {:?}::{:?}", ns, name);
+                    return 4;
+                }
+            }
         }
         MonoTypeEnum::MONO_TYPE_SZARRAY => {
             emit_szarray_size(field_offset, &*(*typ).klass, assembler);

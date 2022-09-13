@@ -8,11 +8,21 @@ use core::{ffi, fmt};
 use std::{ffi, fmt};
 
 extern "C" {
-	pub fn mono_object_get_class(obj: *const MonoObject) -> *const MonoClass;
-    pub fn mono_class_get_fields(klass: *const MonoClass, iter: *const *const ffi::c_void) -> *const MonoClassField;
+    pub fn mono_object_get_class(obj: *const MonoObject) -> *const MonoClass;
+    pub fn mono_class_get_fields(
+        klass: *const MonoClass,
+        iter: *const *const ffi::c_void,
+    ) -> *const MonoClassField;
     pub fn mono_class_get_type(klass: *const MonoClass) -> *const MonoType;
     pub fn mono_field_get_type(field: *const MonoClassField) -> *const MonoType;
     pub fn mono_class_array_element_size(klass: *const MonoClass) -> i32;
+    pub fn mono_class_get_name(klass: *const MonoClass) -> *const RawString;
+    pub fn mono_class_get_namespace(klass: *const MonoClass) -> *const RawString;
+    pub fn mono_class_from_mono_type(typ: *const MonoType) -> *const MonoClass;
+    pub fn mono_class_get_field_from_name(
+        klass: *const MonoClass,
+        name: *const RawString,
+    ) -> *const MonoClassField;
 }
 
 pub struct RawString {}
@@ -50,6 +60,7 @@ pub struct MonoType {
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug)]
+#[rustfmt::skip]
 pub enum MonoTypeEnum {
 	MONO_TYPE_END        = 0x00,       /* End of List */
 	MONO_TYPE_VOID       = 0x01,
