@@ -108,7 +108,7 @@ mod utf16 {
             ;;crate::emit_string_copy("\"", assembler)
             ; mov temp_8, [object + field_offset]
             ; mov BYTE [buffer], temp_8
-            ; add buffer, 1
+            ; add buffer, BYTE 1
             ;;crate::emit_string_copy("\"", assembler)
         );
     }
@@ -122,7 +122,7 @@ mod utf16 {
 
     pub fn emit_char_length(_: i32, assembler: &mut crate::Assembler) {
         json_dynasm!(assembler
-            ; add buffer, 1
+            ; add buffer, BYTE 1
         );
     }
 }
@@ -217,9 +217,15 @@ fn emit_string_copy(string: &str, assembler: &mut Assembler) {
         emit_mov!(offset, BYTE, s[offset] as i8);
     }
 
-    json_dynasm!(assembler
-        ; add buffer, s.len() as _
-    );
+    if s.len() > 255 {
+        json_dynasm!(assembler
+            ; add buffer, WORD s.len() as _
+        );
+    } else {
+        json_dynasm!(assembler
+            ; add buffer, BYTE s.len() as _
+        );
+    }
 }
 
 unsafe fn emit_array(field_offset: i32, eclass: *const MonoClass, assembler: &mut Assembler) {
@@ -264,7 +270,7 @@ unsafe fn emit_array(field_offset: i32, eclass: *const MonoClass, assembler: &mu
 
         /* move to next object and increment counter */
         ; add object, stride
-        ; add r12, 1
+        ; add r12, BYTE 1
         ; cmp r12, r13
         ; jb =>repeat_label
 
@@ -320,13 +326,13 @@ unsafe fn emit_array_size(field_offset: i32, eclass: *const MonoClass, assembler
 
         /* move to next object and increment counter */
         ; add object, stride
-        ; add r12, 1
+        ; add r12, BYTE 1
         ; cmp r12, r13
         ; jb =>repeat_label
 
         /* commas */
         ; add buffer, r13
-        ; sub buffer, 1
+        ; sub buffer, BYTE 1
 
         ;=>exit_label
         ; pop r13
@@ -396,10 +402,10 @@ unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assemble
                 /* Check for 0.0 */
                 ; xorps xmm1, xmm1
                 ; ucomiss xmm0, xmm1
-                ; jne >some
-                ; jp >some
+                ; jne BYTE >some
+                ; jp BYTE >some
                 ;;emit_string_copy("0.0", assembler)
-                ; jmp >end
+                ; jmp BYTE >end
 
                 ;some:
                 ; mov rdi, buffer
@@ -417,10 +423,10 @@ unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assemble
                 /* Check for 0.0 */
                 ; xorpd xmm1, xmm1
                 ; ucomisd xmm0, xmm1
-                ; jne >some
-                ; jp >some
+                ; jne BYTE >some
+                ; jp BYTE >some
                 ;;emit_string_copy("0.0", assembler)
-                ; jmp >end
+                ; jmp BYTE >end
 
                 ;some:
                 ; mov rdi, buffer
@@ -443,10 +449,10 @@ unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assemble
             }
             json_dynasm!(assembler
                 ; test rdi, rdi
-                ; je >null
+                ; je BYTE >null
                 ; mov temp_32, [rdi + 0x10]
                 ; test temp, temp
-                ; je >null
+                ; je BYTE >null
                 ;;emit_string_copy("\"", assembler)
 
                 ; mov rsi, buffer
@@ -455,7 +461,7 @@ unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assemble
 
                 ; add buffer, retval
                 ;;emit_string_copy("\"", assembler)
-                ; jmp >exit
+                ; jmp BYTE >exit
                 ;null:
                 ;;emit_string_copy("\"\"", assembler)
                 ;exit:
@@ -491,7 +497,7 @@ unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assemble
                 ; je =>null_label
 
                 ;;emit_serialize_class(&*(*typ).klass, assembler)
-                ; jmp >exit
+                ; jmp BYTE >exit
                 ;=>null_label
                 ;;emit_string_copy("null", assembler)
 
@@ -615,10 +621,10 @@ unsafe fn emit_calc_value(
                 /* Check for 0.0 */
                 ; xorps xmm1, xmm1
                 ; ucomiss xmm0, xmm1
-                ; jne >some
-                ; jp >some
-                ; add buffer, 3
-                ; jmp >end
+                ; jne BYTE >some
+                ; jp BYTE >some
+                ; add buffer, BYTE 3
+                ; jmp BYTE >end
 
                 ;some:
                 ; mov temp, QWORD calc_float_size::<f32> as _
@@ -635,10 +641,10 @@ unsafe fn emit_calc_value(
                 /* Check for 0.0 */
                 ; xorpd xmm1, xmm1
                 ; ucomisd xmm0, xmm1
-                ; jne >some
-                ; jp >some
-                ; add buffer, 3
-                ; jmp >end
+                ; jne BYTE >some
+                ; jp BYTE >some
+                ; add buffer, BYTE 3
+                ; jmp BYTE >end
 
                 ;some:
                 ; mov temp, QWORD calc_float_size::<f64> as _
@@ -660,10 +666,10 @@ unsafe fn emit_calc_value(
             }
             json_dynasm!(assembler
                 ; test rdi, rdi
-                ; je >null
+                ; je BYTE >null
                 ; mov temp_32, [rdi + 0x10]
                 ; test temp, temp
-                ; je >null
+                ; je BYTE >null
 
                 ;;utf16::emit_string_size(assembler)
 
@@ -704,9 +710,9 @@ unsafe fn emit_calc_value(
 
                 ;;let base_size = emit_calc_class(&*(*typ).klass, assembler)
                 ; add buffer, base_size as _
-                ; jmp >exit
+                ; jmp BYTE >exit
                 ;=>null_label
-                ; add buffer, 4
+                ; add buffer, BYTE 4
 
                 ;exit:
                 ; pop object
