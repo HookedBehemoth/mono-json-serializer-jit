@@ -337,9 +337,17 @@ unsafe fn emit_array_size(field_offset: i32, eclass: *const MonoClass, assembler
 
 unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assembler: &mut Assembler) {
     macro_rules! emit_integer {
-        ($ty:ty, $offset:expr, $reg:ident, $width:expr, $assembler:ident) => {
+        ($ty:ty, $offset:expr, $mov:ident, $reg:ident, $width:expr, $assembler:ident) => {
+            if $offset == 0 {
+                json_dynasm!($assembler
+                    ; $mov $reg, $width [object]
+                );
+            } else {
+                json_dynasm!($assembler
+                    ; $mov $reg, $width [object + $offset]
+                );
+            }
             json_dynasm!($assembler
-                ; mov $reg, $width [object + $offset]
                 ; mov rsi, buffer
                 ; mov temp, QWORD push_integer::<$ty> as _
                 ; call temp
@@ -356,30 +364,30 @@ unsafe fn emit_serialize_value(typ: *const MonoType, field_offset: i32, assemble
             utf16::emit_char(field_offset, assembler);
         }
         MonoTypeEnum::MONO_TYPE_I1 => {
-            emit_integer!(i8, field_offset, dil, BYTE, assembler);
+            emit_integer!(i8, field_offset, movsx, edi, BYTE, assembler);
         }
         MonoTypeEnum::MONO_TYPE_I2 => {
-            emit_integer!(i16, field_offset, di, WORD, assembler);
+            emit_integer!(i16, field_offset, movsx, edi, WORD, assembler);
         }
         MonoTypeEnum::MONO_TYPE_I4 => {
-            emit_integer!(i32, field_offset, edi, DWORD, assembler);
+            emit_integer!(i32, field_offset, mov, edi, DWORD, assembler);
         }
         /* FIXME: So far, we're only running on 64 bit */
         MonoTypeEnum::MONO_TYPE_I8 | MonoTypeEnum::MONO_TYPE_I => {
-            emit_integer!(i64, field_offset, rdi, QWORD, assembler);
+            emit_integer!(i64, field_offset, mov, rdi, QWORD, assembler);
         }
         MonoTypeEnum::MONO_TYPE_U1 => {
-            emit_integer!(u8, field_offset, dil, BYTE, assembler);
+            emit_integer!(u8, field_offset, movzx, edi, BYTE, assembler);
         }
         MonoTypeEnum::MONO_TYPE_U2 => {
-            emit_integer!(u16, field_offset, di, WORD, assembler);
+            emit_integer!(u16, field_offset, movzx, edi, WORD, assembler);
         }
         MonoTypeEnum::MONO_TYPE_U4 => {
-            emit_integer!(u32, field_offset, edi, DWORD, assembler);
+            emit_integer!(u32, field_offset, mov, edi, DWORD, assembler);
         }
         /* FIXME: So far, we're only running on 64 bit */
         MonoTypeEnum::MONO_TYPE_U8 | MonoTypeEnum::MONO_TYPE_U => {
-            emit_integer!(u64, field_offset, rdi, QWORD, assembler);
+            emit_integer!(u64, field_offset, mov, rdi, QWORD, assembler);
         }
         MonoTypeEnum::MONO_TYPE_R4 => {
             json_dynasm!(assembler
@@ -529,9 +537,17 @@ unsafe fn emit_calc_value(
     assembler: &mut Assembler,
 ) -> usize {
     macro_rules! emit_integer_size {
-        ($ty:ty, $offset:expr, $reg:ident, $width:expr, $assembler:ident) => {
+        ($ty:ty, $offset:expr, $mov:ident, $reg:ident, $width:expr, $assembler:ident) => {
+            if $offset == 0 {
+                json_dynasm!($assembler
+                    ; $mov $reg, $width [object]
+                );
+            } else {
+                json_dynasm!($assembler
+                    ; $mov $reg, $width [object + $offset]
+                );
+            }
             json_dynasm!($assembler
-                ; mov $reg, $width [object + $offset]
                 ; mov temp, QWORD calc_integer_size::<$ty> as _
                 ; call temp
                 ; add buffer, retval
@@ -552,30 +568,30 @@ unsafe fn emit_calc_value(
             return 2;
         }
         MonoTypeEnum::MONO_TYPE_I1 => {
-            emit_integer_size!(i8, field_offset, dil, BYTE, assembler);
+            emit_integer_size!(i8, field_offset, movsx, edi, BYTE, assembler);
         }
         MonoTypeEnum::MONO_TYPE_I2 => {
-            emit_integer_size!(i16, field_offset, di, WORD, assembler);
+            emit_integer_size!(i16, field_offset, movsx, edi, WORD, assembler);
         }
         MonoTypeEnum::MONO_TYPE_I4 => {
-            emit_integer_size!(i32, field_offset, edi, DWORD, assembler);
+            emit_integer_size!(i32, field_offset, mov, edi, DWORD, assembler);
         }
         /* FIXME: So far, we're only running on 64 bit */
         MonoTypeEnum::MONO_TYPE_I8 | MonoTypeEnum::MONO_TYPE_I => {
-            emit_integer_size!(i64, field_offset, rdi, QWORD, assembler);
+            emit_integer_size!(i64, field_offset, mov, rdi, QWORD, assembler);
         }
         MonoTypeEnum::MONO_TYPE_U1 => {
-            emit_integer_size!(u8, field_offset, dil, BYTE, assembler);
+            emit_integer_size!(u8, field_offset, movzx, edi, BYTE, assembler);
         }
         MonoTypeEnum::MONO_TYPE_U2 => {
-            emit_integer_size!(u16, field_offset, di, WORD, assembler);
+            emit_integer_size!(u16, field_offset, movzx, edi, WORD, assembler);
         }
         MonoTypeEnum::MONO_TYPE_U4 => {
-            emit_integer_size!(u32, field_offset, edi, DWORD, assembler);
+            emit_integer_size!(u32, field_offset, mov, edi, DWORD, assembler);
         }
         /* FIXME: So far, we're only running on 64 bit */
         MonoTypeEnum::MONO_TYPE_U8 | MonoTypeEnum::MONO_TYPE_U => {
-            emit_integer_size!(u64, field_offset, rdi, QWORD, assembler);
+            emit_integer_size!(u64, field_offset, mov, rdi, QWORD, assembler);
         }
         MonoTypeEnum::MONO_TYPE_R4 => {
             json_dynasm!(assembler
