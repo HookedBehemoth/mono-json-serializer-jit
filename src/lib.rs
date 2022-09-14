@@ -195,7 +195,7 @@ unsafe fn emit_calc_value(
     match (*typ).typ {
         MonoTypeEnum::MONO_TYPE_BOOLEAN => {
             json_dynasm!(assembler
-                ; mov temp_8, BYTE [object + field_offset]
+                ; movzx temp_32, BYTE [object + field_offset]
                 ; sub buffer, temp
             );
             return 5;
