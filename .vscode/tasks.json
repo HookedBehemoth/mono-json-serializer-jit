@@ -1,0 +1,60 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build boehm cargo",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["build", "--features", "boehm"]
+        },
+        {
+            "label": "build sgen cargo",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["build", "--features", "sgen"],
+        },
+        {
+            "label": "build dotnet",
+            "type": "shell",
+            "command": "dotnet",
+            "args": ["build"],
+            "options": {
+              "cwd": "${workspaceFolder}/example"
+            }
+        },
+        {
+            "label": "build boehm",
+            "dependsOn": ["build dotnet", "build boehm cargo"],
+            "type": "shell"
+        },
+        {
+            "label": "build sgen",
+            "dependsOn": ["build dotnet", "build sgen cargo"],
+            "type": "shell"
+        },
+        {
+            "label": "run boehm",
+            "dependsOn": ["build boehm"],
+            "type": "shell",
+            "command": "mono",
+            "args": ["--gc=boehm", "${workspaceFolder}/example/bin/Debug/net472/example.exe", "${workspaceFolder}/target/debug/libjitted.so"],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            }
+        },
+        {
+            "label": "run sgen",
+            "dependsOn": ["build sgen"],
+            "type": "shell",
+            "command": "mono",
+            "args": ["--gc=sgen", "${workspaceFolder}/example/bin/Debug/net472/example.exe", "${workspaceFolder}/target/debug/libjitted.so"],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            }
+        }
+    ]
+}
